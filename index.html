@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Konik Matematyczny</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, sans-serif; touch-action: none; }
+canvas { display: block; }
+
+#hud {
+  position: fixed; top: 0; left: 0; right: 0;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 15px 20px; pointer-events: none; z-index: 10;
+}
+.hud-box {
+  background: rgba(0,0,0,0.5); color: #fff; padding: 8px 16px;
+  border-radius: 12px; font-size: 18px; backdrop-filter: blur(4px);
+}
+#carrots { color: #FFA500; }
+#level-display { color: #88ff88; font-size: 14px; }
+
+#question-bar {
+  position: fixed; top: 50px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.7); color: #fff; padding: 12px 28px;
+  border-radius: 16px; font-size: 26px; font-weight: bold;
+  backdrop-filter: blur(6px); z-index: 10; display: none;
+  border: 2px solid rgba(255,200,50,0.5);
+  text-align: center; min-width: 200px;
+}
+
+#feedback {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 48px; font-weight: bold; z-index: 20; display: none;
+  text-shadow: 0 0 20px rgba(0,0,0,0.8); pointer-events: none;
+}
+
+#intro {
+  position: fixed; inset: 0; background: rgba(0,20,5,0.92);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 100; color: #fff; text-align: center; padding: 20px;
+}
+#intro h1 { font-size: 42px; margin-bottom: 10px; color: #FFD700; }
+#intro h2 { font-size: 20px; margin-bottom: 30px; color: #aaddaa; font-weight: normal; }
+#intro .instructions { font-size: 16px; color: #ccc; margin-bottom: 30px; line-height: 1.6; max-width: 400px; }
+#intro button {
+  background: #4CAF50; color: #fff; border: none; padding: 16px 48px;
+  font-size: 22px; border-radius: 30px; cursor: pointer;
+  transition: transform 0.2s, background 0.2s;
+}
+#intro button:hover { background: #66BB6A; transform: scale(1.05); }
+
+#joystick-area {
+  position: fixed; bottom: 20px; left: 20px; width: 140px; height: 140px;
+  z-index: 10; display: none;
+}
+#joystick-base {
+  width: 120px; height: 120px; border-radius: 50%;
+  background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3);
+  position: absolute; bottom: 0; left: 0;
+}
+#joystick-thumb {
+  width: 50px; height: 50px; border-radius: 50%;
+  background: rgba(255,255,255,0.4);
+  position: absolute; bottom: 35px; left: 35px;
+  transition: none;
+}
+</style>
+</head>
+<body>
+
+<div id="intro">
+  <h1>🐴 Konik Matematyczny</h1>
+  <h2>Naucz się matematyki z laserówki!</h2>
+  <div class="instructions">
+    Steruj konikiem i podjeżdżaj do świecących bramek.<br>
+    Nad bramkami pojawi się zadanie matematyczne.<br>
+    Wjedź w kupkę siana z prawidłową odpowiedzią!<br><br>
+    <b>Komputer:</b> WASD lub strzałki<br>
+    <b>Telefon:</b> joystick w rogu ekranu
+  </div>
+  <button onclick="startGame()">GRAJ!</button>
+</div>
+
+<div id="hud">
+  <div class="hud-box">🥕 <span id="carrots">0</span></div>
+  <div class="hud-box">🐴 Konik Matematyczny<br><span id="level-display">Poziom 1</span></div>
+</div>
+
+<div id="question-bar"></div>
+<div id="feedback"></div>
+
+<div id="joystick-area">
+  <div id="joystick-base"></div>
+  <div id="joystick-thumb"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ========== GLOBALS ==========
+let scene, camera, renderer;
+let horse, horseGroup;
+let clock = new THREE.Clock();
+let carrots = 0;
+let level = 1;
+let maxNumber = 10; // starts with 1-10, auto-increases
+let correctAnswers = 0;
+let totalAnswers = 0;
+
+// Challenge state
+let challenges = [];
+let activeChallenge = null;
+let challengeCooldown = 0;
+
+// Input
+const keys = {};
+let joystickDir = { x: 0, y: 0 };
+let isMobile = false;
+
+// Horse movement
+const horsePos = new THREE.Vector3(0, 0, 0);
+let horseAngle = 0;
+let horseSpeed = 0;
+const MAX_SPEED = 8;
+let walkTime = 0;
+let legBones = [];
+
+// ========== SCENE SETUP ==========
+function initScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  scene.fog = new THREE.Fog(0x87CEEB, 60, 120);
+
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
+  camera.position.set(0, 8, 12);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambient);
+
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+  sun.position.set(20, 30, 20);
+  sun.castShadow = true;
+  sun.shadow.mapSize.width = 2048;
+  sun.shadow.mapSize.height = 2048;
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 100;
+  sun.shadow.camera.left = -40;
+  sun.shadow.camera.right = 40;
+  sun.shadow.camera.top = 40;
+  sun.shadow.camera.bottom = -40;
+  scene.add(sun);
+
+  // Ground
+  const groundGeo = new THREE.PlaneGeometry(200, 200);
+  const groundMat = new THREE.MeshLambertMaterial({ color: 0x4a8c3f });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Decorative grass patches
+  for (let i = 0; i < 200; i++) {
+    const x = (Math.random() - 0.5) * 160;
+    const z = (Math.random() - 0.5) * 160;
+    const patchGeo = new THREE.CircleGeometry(0.3 + Math.random() * 0.5, 6);
+    const patchMat = new THREE.MeshLambertMaterial({
+      color: new THREE.Color().setHSL(0.28 + Math.random() * 0.05, 0.6, 0.3 + Math.random() * 0.15)
+    });
+    const patch = new THREE.Mesh(patchGeo, patchMat);
+    patch.rotation.x = -Math.PI / 2;
+    patch.position.set(x, 0.01, z);
+    scene.add(patch);
+  }
+
+  // Trees
+  for (let i = 0; i < 30; i++) {
+    const x = (Math.random() - 0.5) * 140;
+    const z = (Math.random() - 0.5) * 140;
+    if (Math.abs(x) < 10 && Math.abs(z) < 10) continue; // keep center clear
+    createTree(x, z);
+  }
+}
+
+function createTree(x, z) {
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 0.3, 2, 6),
+    new THREE.MeshLambertMaterial({ color: 0x8B4513 })
+  );
+  trunk.position.set(x, 1, z);
+  trunk.castShadow = true;
+  scene.add(trunk);
+
+  const crown = new THREE.Mesh(
+    new THREE.SphereGeometry(1.5 + Math.random(), 8, 6),
+    new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(0.3, 0.5, 0.25 + Math.random() * 0.1) })
+  );
+  crown.position.set(x, 3 + Math.random() * 0.5, z);
+  crown.castShadow = true;
+  scene.add(crown);
+}
+
+// ========== POINT CLOUD HORSE ==========
+function createHorse() {
+  horseGroup = new THREE.Group();
+  const points = [];
+  const colors = [];
+
+  const white = new THREE.Color(0.95, 0.95, 0.97);
+  const maneColor = new THREE.Color(0.9, 0.4, 0.7); // pink/purple mane
+  const tailColor = new THREE.Color(0.7, 0.3, 0.9);  // purple tail
+  const hoofColor = new THREE.Color(0.3, 0.3, 0.3);
+
+  // Body (ellipsoid)
+  for (let i = 0; i < 400; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = 0.9 + Math.random() * 0.1;
+    const x = r * 1.6 * Math.sin(phi) * Math.cos(theta);
+    const y = r * 0.7 * Math.sin(phi) * Math.sin(theta);
+    const z = r * 0.6 * Math.cos(phi);
+    points.push(x, y + 1.4, z);
+    colors.push(white.r, white.g, white.b);
+  }
+
+  // Head
+  for (let i = 0; i < 200; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = 0.45 + Math.random() * 0.05;
+    const x = r * 1.1 * Math.sin(phi) * Math.cos(theta) + 2.0;
+    const y = r * 0.7 * Math.sin(phi) * Math.sin(theta) + 2.0;
+    const z = r * 0.5 * Math.cos(phi);
+    points.push(x, y, z);
+    colors.push(white.r, white.g, white.b);
+  }
+
+  // Neck
+  for (let i = 0; i < 150; i++) {
+    const t = Math.random();
+    const angle = Math.random() * Math.PI * 2;
+    const r = 0.3 + Math.random() * 0.1;
+    const x = 1.3 + t * 0.7;
+    const y = 1.4 + t * 0.6 + Math.cos(angle) * r * 0.5;
+    const z = Math.sin(angle) * r;
+    points.push(x, y, z);
+    colors.push(white.r, white.g, white.b);
+  }
+
+  // Ears
+  for (let ear = -1; ear <= 1; ear += 2) {
+    for (let i = 0; i < 20; i++) {
+      const t = Math.random();
+      points.push(
+        2.0 + Math.random() * 0.1,
+        2.4 + t * 0.3,
+        ear * 0.2 + Math.random() * 0.05
+      );
+      colors.push(white.r, white.g, white.b);
+    }
+  }
+
+  // Eyes
+  const eyeColor = new THREE.Color(0.1, 0.1, 0.2);
+  for (let side = -1; side <= 1; side += 2) {
+    for (let i = 0; i < 15; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 0.06;
+      points.push(
+        2.3 + r * Math.sin(phi) * Math.cos(theta),
+        2.05 + r * Math.sin(phi) * Math.sin(theta),
+        side * 0.3 + r * Math.cos(phi)
+      );
+      colors.push(eyeColor.r, eyeColor.g, eyeColor.b);
+    }
+  }
+
+  // Legs (4 legs, stored for animation)
+  const legPositions = [
+    { x: 1.0, z: 0.35, phase: 0 },
+    { x: 1.0, z: -0.35, phase: Math.PI },
+    { x: -1.0, z: 0.35, phase: Math.PI },
+    { x: -1.0, z: -0.35, phase: 0 },
+  ];
+
+  const legStartIdx = points.length / 3;
+  legPositions.forEach((leg) => {
+    for (let i = 0; i < 60; i++) {
+      const t = Math.random();
+      const angle = Math.random() * Math.PI * 2;
+      const r = 0.1 + Math.random() * 0.03;
+      const x = leg.x + Math.cos(angle) * r;
+      const y = t * 1.2;
+      const z = leg.z + Math.sin(angle) * r;
+      points.push(x, y, z);
+      // Hooves at bottom
+      if (t < 0.15) {
+        colors.push(hoofColor.r, hoofColor.g, hoofColor.b);
+      } else {
+        colors.push(white.r, white.g, white.b);
+      }
+    }
+  });
+
+  // Mane (along neck/back, colorful!)
+  for (let i = 0; i < 120; i++) {
+    const t = Math.random();
+    const x = 0.5 + t * 1.8;
+    const y = 1.8 + t * 0.4 + Math.random() * 0.3;
+    const z = (Math.random() - 0.5) * 0.15;
+    points.push(x, y, z);
+    const c = new THREE.Color().lerpColors(maneColor, tailColor, Math.random());
+    colors.push(c.r, c.g, c.b);
+  }
+
+  // Tail
+  for (let i = 0; i < 80; i++) {
+    const t = Math.random();
+    const curve = t * t * 0.5;
+    const x = -1.6 - t * 0.8;
+    const y = 1.2 - curve + (Math.random() - 0.5) * 0.2;
+    const z = (Math.random() - 0.5) * 0.3;
+    points.push(x, y, z);
+    const c = new THREE.Color().lerpColors(tailColor, maneColor, Math.random());
+    colors.push(c.r, c.g, c.b);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+  const material = new THREE.PointsMaterial({
+    size: 0.08,
+    vertexColors: true,
+    sizeAttenuation: true,
+  });
+
+  horse = new THREE.Points(geometry, material);
+  horseGroup.add(horse);
+  horseGroup.castShadow = true;
+  scene.add(horseGroup);
+
+  // Store leg data for animation
+  legBones = legPositions.map((leg, i) => ({
+    startIdx: legStartIdx + i * 60,
+    count: 60,
+    baseX: leg.x,
+    baseZ: leg.z,
+    phase: leg.phase,
+  }));
+}
+
+// ========== CHALLENGES ==========
+function createChallenge() {
+  const dist = 15 + Math.random() * 30;
+  const angle = Math.random() * Math.PI * 2;
+  const cx = horsePos.x + Math.cos(angle) * dist;
+  const cz = horsePos.z + Math.sin(angle) * dist;
+
+  // Generate math problem
+  const { question, answer } = generateProblem();
+  const wrongAnswers = generateWrongAnswers(answer);
+
+  // Shuffle answers into 3 hay piles
+  const answers = [answer, ...wrongAnswers].sort(() => Math.random() - 0.5);
+
+  const group = new THREE.Group();
+  group.position.set(cx, 0, cz);
+
+  // Gate/arch indicator (glowing pillar)
+  const pillarGeo = new THREE.CylinderGeometry(0.15, 0.15, 4, 8);
+  const pillarMat = new THREE.MeshStandardMaterial({
+    color: 0xFFD700, emissive: 0xFFD700, emissiveIntensity: 0.3
+  });
+
+  const pillarLeft = new THREE.Mesh(pillarGeo, pillarMat);
+  pillarLeft.position.set(-4, 2, 0);
+  group.add(pillarLeft);
+
+  const pillarRight = new THREE.Mesh(pillarGeo, pillarMat);
+  pillarRight.position.set(4, 2, 0);
+  group.add(pillarRight);
+
+  // Top bar
+  const barGeo = new THREE.BoxGeometry(8.5, 0.2, 0.2);
+  const bar = new THREE.Mesh(barGeo, pillarMat);
+  bar.position.set(0, 4, 0);
+  group.add(bar);
+
+  // Light beacon above
+  const beaconGeo = new THREE.SphereGeometry(0.4, 8, 8);
+  const beaconMat = new THREE.MeshStandardMaterial({
+    color: 0xFFFF00, emissive: 0xFFFF00, emissiveIntensity: 0.8, transparent: true, opacity: 0.7
+  });
+  const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+  beacon.position.set(0, 5, 0);
+  group.add(beacon);
+
+  // 3 hay piles with answers
+  const hayPiles = [];
+  for (let i = 0; i < 3; i++) {
+    const hx = (i - 1) * 3; // -3, 0, 3
+    const hayGroup = new THREE.Group();
+    hayGroup.position.set(hx, 0, 0);
+
+    // Hay pile (cone + sphere)
+    const hayBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.8, 1.0, 0.8, 8),
+      new THREE.MeshLambertMaterial({ color: 0xDAA520 })
+    );
+    hayBase.position.y = 0.4;
+    hayGroup.add(hayBase);
+
+    const hayTop = new THREE.Mesh(
+      new THREE.ConeGeometry(0.7, 0.8, 8),
+      new THREE.MeshLambertMaterial({ color: 0xCD950C })
+    );
+    hayTop.position.y = 1.2;
+    hayGroup.add(hayTop);
+
+    // Number display (billboard sprite)
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(64, 64, 50, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.font = 'bold 60px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(answers[i]), 64, 66);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.position.set(0, 2.2, 0);
+    sprite.scale.set(1.2, 1.2, 1);
+    hayGroup.add(sprite);
+
+    group.add(hayGroup);
+    hayPiles.push({
+      localX: hx,
+      answer: answers[i],
+      correct: answers[i] === answer,
+    });
+  }
+
+  scene.add(group);
+
+  const challenge = {
+    group,
+    position: new THREE.Vector3(cx, 0, cz),
+    question,
+    answer,
+    hayPiles,
+    active: true,
+    revealed: false,
+  };
+  challenges.push(challenge);
+  return challenge;
+}
+
+function generateProblem() {
+  const type = Math.random() < 0.5 ? 'add' : 'sub';
+  let a, b, answer, question;
+
+  if (type === 'add') {
+    a = 1 + Math.floor(Math.random() * maxNumber);
+    b = 1 + Math.floor(Math.random() * maxNumber);
+    answer = a + b;
+    question = `${a} + ${b} = ?`;
+  } else {
+    a = 2 + Math.floor(Math.random() * maxNumber);
+    b = 1 + Math.floor(Math.random() * (a - 1));
+    answer = a - b;
+    question = `${a} − ${b} = ?`;
+  }
+  return { question, answer };
+}
+
+function generateWrongAnswers(correct) {
+  const wrongs = new Set();
+  while (wrongs.size < 2) {
+    let w = correct + Math.floor(Math.random() * 5) - 2;
+    if (w !== correct && w >= 0) wrongs.add(w);
+  }
+  return [...wrongs];
+}
+
+// ========== INPUT ==========
+function initInput() {
+  window.addEventListener('keydown', (e) => { keys[e.code] = true; });
+  window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+  // Detect mobile
+  isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  if (isMobile) {
+    document.getElementById('joystick-area').style.display = 'block';
+    initJoystick();
+  }
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+function initJoystick() {
+  const area = document.getElementById('joystick-area');
+  const thumb = document.getElementById('joystick-thumb');
+  const base = document.getElementById('joystick-base');
+  let touching = false;
+  const centerX = 60, centerY = 60;
+  const maxDist = 40;
+
+  function handleTouch(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = base.getBoundingClientRect();
+    const dx = touch.clientX - (rect.left + rect.width / 2);
+    const dy = touch.clientY - (rect.top + rect.height / 2);
+    const dist = Math.min(Math.sqrt(dx * dx + dy * dy), maxDist);
+    const angle = Math.atan2(dy, dx);
+
+    const nx = Math.cos(angle) * dist;
+    const ny = Math.sin(angle) * dist;
+
+    thumb.style.left = (centerX - 25 + nx) + 'px';
+    thumb.style.top = (centerY - 25 + ny) + 'px';
+
+    joystickDir.x = nx / maxDist;
+    joystickDir.y = ny / maxDist;
+  }
+
+  area.addEventListener('touchstart', (e) => {
+    touching = true;
+    handleTouch(e);
+  }, { passive: false });
+
+  area.addEventListener('touchmove', (e) => {
+    if (touching) handleTouch(e);
+  }, { passive: false });
+
+  const resetJoystick = () => {
+    touching = false;
+    thumb.style.left = (centerX - 25) + 'px';
+    thumb.style.top = (centerY - 25) + 'px';
+    joystickDir.x = 0;
+    joystickDir.y = 0;
+  };
+
+  area.addEventListener('touchend', resetJoystick);
+  area.addEventListener('touchcancel', resetJoystick);
+}
+
+function getInput() {
+  let dx = 0, dz = 0;
+
+  if (keys['ArrowUp'] || keys['KeyW']) dz = -1;
+  if (keys['ArrowDown'] || keys['KeyS']) dz = 1;
+  if (keys['ArrowLeft'] || keys['KeyA']) dx = -1;
+  if (keys['ArrowRight'] || keys['KeyD']) dx = 1;
+
+  if (isMobile) {
+    dx += joystickDir.x;
+    dz += joystickDir.y;
+  }
+
+  const len = Math.sqrt(dx * dx + dz * dz);
+  if (len > 0.1) {
+    return { x: dx / len, z: dz / len, moving: true };
+  }
+  return { x: 0, z: 0, moving: false };
+}
+
+// ========== ANIMATION ==========
+function animateHorse(dt, moving) {
+  if (!horse) return;
+  const positions = horse.geometry.attributes.position.array;
+
+  if (moving) {
+    walkTime += dt * 8;
+  }
+
+  // Animate legs
+  legBones.forEach((leg) => {
+    for (let i = 0; i < leg.count; i++) {
+      const idx = (leg.startIdx + i) * 3;
+      const t = positions[idx + 1] / 1.2; // normalized height
+      const swing = moving ? Math.sin(walkTime + leg.phase) * 0.3 * (1 - t) : 0;
+      // Only adjust x offset for walking swing
+      const baseX = leg.baseX;
+      positions[idx] = baseX + swing;
+    }
+  });
+
+  horse.geometry.attributes.position.needsUpdate = true;
+}
+
+// ========== GAME LOOP ==========
+function update() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const input = getInput();
+
+  // Move horse
+  if (input.moving) {
+    horseSpeed = THREE.MathUtils.lerp(horseSpeed, MAX_SPEED, dt * 5);
+    const targetAngle = Math.atan2(input.x, input.z);
+    // Smooth rotation
+    let angleDiff = targetAngle - horseAngle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    horseAngle += angleDiff * dt * 8;
+
+    horsePos.x += Math.sin(horseAngle) * horseSpeed * dt;
+    horsePos.z += Math.cos(horseAngle) * horseSpeed * dt;
+  } else {
+    horseSpeed = THREE.MathUtils.lerp(horseSpeed, 0, dt * 8);
+  }
+
+  // Update horse transform
+  horseGroup.position.copy(horsePos);
+  horseGroup.rotation.y = horseAngle;
+
+  // Animate horse
+  animateHorse(dt, input.moving);
+
+  // Camera follow
+  const camTarget = new THREE.Vector3(
+    horsePos.x - Math.sin(horseAngle) * 10,
+    horsePos.y + 6,
+    horsePos.z - Math.cos(horseAngle) * 10
+  );
+  camera.position.lerp(camTarget, dt * 3);
+  camera.lookAt(horsePos.x, horsePos.y + 1.5, horsePos.z);
+
+  // Challenge management
+  challengeCooldown -= dt;
+  if (challenges.filter(c => c.active).length < 3 && challengeCooldown <= 0) {
+    createChallenge();
+    challengeCooldown = 2;
+  }
+
+  // Check proximity to challenges
+  const questionBar = document.getElementById('question-bar');
+  let nearChallenge = null;
+
+  for (const ch of challenges) {
+    if (!ch.active) continue;
+    const dist = horsePos.distanceTo(ch.position);
+
+    // Show question when close
+    if (dist < 12) {
+      nearChallenge = ch;
+      if (!ch.revealed) {
+        questionBar.textContent = ch.question;
+        questionBar.style.display = 'block';
+        ch.revealed = true;
+      }
+
+      // Check collision with hay piles
+      for (const pile of ch.hayPiles) {
+        const pileWorld = new THREE.Vector3(
+          ch.position.x + pile.localX,
+          0,
+          ch.position.z
+        );
+        const pileDist = horsePos.distanceTo(pileWorld);
+
+        if (pileDist < 1.5) {
+          handleAnswer(ch, pile);
+        }
+      }
+    }
+
+    // Animate beacon
+    if (ch.group) {
+      const beacon = ch.group.children.find(c => c.geometry && c.geometry.type === 'SphereGeometry');
+      if (beacon) {
+        beacon.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.3;
+      }
+    }
+  }
+
+  if (!nearChallenge) {
+    questionBar.style.display = 'none';
+  }
+
+  // Remove far-away challenges
+  for (let i = challenges.length - 1; i >= 0; i--) {
+    const ch = challenges[i];
+    if (!ch.active) continue;
+    const dist = horsePos.distanceTo(ch.position);
+    if (dist > 80) {
+      scene.remove(ch.group);
+      challenges.splice(i, 1);
+    }
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(update);
+}
+
+function handleAnswer(challenge, pile) {
+  if (!challenge.active) return;
+  challenge.active = false;
+
+  const feedbackEl = document.getElementById('feedback');
+  const questionBar = document.getElementById('question-bar');
+
+  if (pile.correct) {
+    // Correct!
+    carrots++;
+    correctAnswers++;
+    totalAnswers++;
+    document.getElementById('carrots').textContent = carrots;
+
+    feedbackEl.textContent = '✅ Brawo!';
+    feedbackEl.style.color = '#4CAF50';
+    feedbackEl.style.display = 'block';
+
+    // Particle burst effect
+    spawnParticles(challenge.position);
+
+    // Auto-adjust difficulty
+    updateDifficulty();
+
+    // Remove challenge after delay
+    setTimeout(() => {
+      scene.remove(challenge.group);
+      const idx = challenges.indexOf(challenge);
+      if (idx >= 0) challenges.splice(idx, 1);
+    }, 800);
+  } else {
+    // Wrong - let them try again
+    totalAnswers++;
+    feedbackEl.textContent = '❌ Spróbuj inną kupkę!';
+    feedbackEl.style.color = '#FF5722';
+    feedbackEl.style.display = 'block';
+    challenge.active = true; // Keep active so they can try again
+
+    // Push horse back slightly
+    horsePos.x -= Math.sin(horseAngle) * 3;
+    horsePos.z -= Math.cos(horseAngle) * 3;
+
+    updateDifficulty();
+  }
+
+  questionBar.style.display = 'none';
+
+  setTimeout(() => {
+    feedbackEl.style.display = 'none';
+  }, 1500);
+}
+
+function updateDifficulty() {
+  // Calculate success rate over last answers
+  const rate = totalAnswers > 0 ? correctAnswers / totalAnswers : 0;
+
+  if (correctAnswers >= 5 && rate > 0.7 && maxNumber < 50) {
+    maxNumber = Math.min(maxNumber + 5, 50);
+    level = Math.floor((maxNumber - 5) / 5);
+    document.getElementById('level-display').textContent = `Poziom ${level} (do ${maxNumber})`;
+    // Reset counters for next batch
+    correctAnswers = 0;
+    totalAnswers = 0;
+  } else if (totalAnswers >= 5 && rate < 0.4 && maxNumber > 5) {
+    maxNumber = Math.max(maxNumber - 5, 5);
+    level = Math.max(1, Math.floor((maxNumber - 5) / 5));
+    document.getElementById('level-display').textContent = `Poziom ${level} (do ${maxNumber})`;
+    correctAnswers = 0;
+    totalAnswers = 0;
+  }
+}
+
+// ========== PARTICLES ==========
+function spawnParticles(pos) {
+  const count = 50;
+  const geom = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const velocities = [];
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = pos.x;
+    positions[i * 3 + 1] = pos.y + 2;
+    positions[i * 3 + 2] = pos.z;
+
+    const c = new THREE.Color().setHSL(0.1 + Math.random() * 0.1, 1, 0.5);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+
+    velocities.push({
+      x: (Math.random() - 0.5) * 8,
+      y: Math.random() * 6 + 2,
+      z: (Math.random() - 0.5) * 8,
+    });
+  }
+
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.15,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1,
+  });
+
+  const particles = new THREE.Points(geom, mat);
+  scene.add(particles);
+
+  let time = 0;
+  function animateParticles() {
+    time += 0.016;
+    if (time > 1.5) {
+      scene.remove(particles);
+      geom.dispose();
+      mat.dispose();
+      return;
+    }
+
+    const pos = geom.attributes.position.array;
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] += velocities[i].x * 0.016;
+      pos[i * 3 + 1] += velocities[i].y * 0.016;
+      pos[i * 3 + 2] += velocities[i].z * 0.016;
+      velocities[i].y -= 9.8 * 0.016;
+    }
+    geom.attributes.position.needsUpdate = true;
+    mat.opacity = 1 - time / 1.5;
+
+    requestAnimationFrame(animateParticles);
+  }
+  animateParticles();
+}
+
+// ========== START ==========
+window.startGame = function () {
+  document.getElementById('intro').style.display = 'none';
+
+  initScene();
+  createHorse();
+  initInput();
+
+  // Spawn initial challenges
+  for (let i = 0; i < 3; i++) {
+    createChallenge();
+  }
+
+  update();
+};
+</script>
+</body>
+</html>
