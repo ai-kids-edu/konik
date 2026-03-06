@@ -500,12 +500,16 @@ function generateProblem() {
 }
 
 function generateWrongAnswers(correct) {
-  const wrongs = new Set();
-  while (wrongs.size < 2) {
-    let w = correct + Math.floor(Math.random() * 5) - 2;
-    if (w !== correct && w >= 0) wrongs.add(w);
+  const candidates = [];
+  for (let i = Math.max(0, correct - 3); i <= correct + 3; i++) {
+    if (i !== correct) candidates.push(i);
   }
-  return [...wrongs];
+  // Shuffle and pick 2
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  return candidates.slice(0, 2);
 }
 
 // ========== INPUT ==========
@@ -697,7 +701,7 @@ function update() {
 
     // Animate beacon
     if (ch.group) {
-      const beacon = ch.group.children.find(c => c.geometry && c.geometry.type === 'SphereGeometry');
+      const beacon = ch.group.children[3]; // beacon sphere
       if (beacon) {
         beacon.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.3;
       }
