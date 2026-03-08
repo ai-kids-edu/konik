@@ -76,7 +76,7 @@ canvas { display: block; }
   <div class="instructions">
     Steruj konikiem i podjeżdżaj do świecących bramek.<br>
     Nad bramkami pojawi się zadanie matematyczne.<br>
-    Wjedź w kupkę siana z prawidłową odpowiedzią!<br><br>
+    Wjedź w stosik siana z prawidłową odpowiedzią!<br><br>
     <b>Komputer:</b> WASD lub strzałki<br>
     <b>Telefon:</b> joystick w rogu ekranu
   </div>
@@ -126,6 +126,9 @@ let challengeCooldown = 0;
 const keys = {};
 let joystickDir = { x: 0, y: 0 };
 let isMobile = false;
+
+// Tree positions (for collision avoidance)
+let treePositions = [];
 
 // Horse movement
 const horsePos = new THREE.Vector3(0, 0, 0);
@@ -195,6 +198,7 @@ function initScene() {
     const x = (Math.random() - 0.5) * 140;
     const z = (Math.random() - 0.5) * 140;
     if (Math.abs(x) < 10 && Math.abs(z) < 10) continue; // keep center clear
+    treePositions.push({ x, z });
     createTree(x, z);
   }
 }
@@ -220,6 +224,10 @@ function createTree(x, z) {
 // ========== LOW-POLY MESH HORSE ==========
 function createHorse() {
   horseGroup = new THREE.Group();
+  // Inner group rotated so model (built along +X) faces +Z (movement direction)
+  const horseModel = new THREE.Group();
+  horseModel.rotation.y = -Math.PI / 2;
+  horseGroup.add(horseModel);
   legMeshes = [];
 
   const bodyMat = new THREE.MeshLambertMaterial({ color: 0xD2A679 });
@@ -234,7 +242,7 @@ function createHorse() {
   );
   body.position.set(0, 1.4, 0);
   body.castShadow = true;
-  horseGroup.add(body);
+  horseModel.add(body);
   horse = body;
 
   // Neck (tilted cylinder)
@@ -245,7 +253,7 @@ function createHorse() {
   neck.position.set(1.4, 2.0, 0);
   neck.rotation.z = -0.5; // tilt forward
   neck.castShadow = true;
-  horseGroup.add(neck);
+  horseModel.add(neck);
 
   // Head
   const head = new THREE.Mesh(
@@ -254,7 +262,7 @@ function createHorse() {
   );
   head.position.set(2.1, 2.3, 0);
   head.castShadow = true;
-  horseGroup.add(head);
+  horseModel.add(head);
 
   // Snout / muzzle (smaller box at front of head)
   const snout = new THREE.Mesh(
@@ -263,7 +271,7 @@ function createHorse() {
   );
   snout.position.set(2.7, 2.15, 0);
   snout.castShadow = true;
-  horseGroup.add(snout);
+  horseModel.add(snout);
 
   // Eyes
   for (let side = -1; side <= 1; side += 2) {
@@ -272,7 +280,7 @@ function createHorse() {
       eyeMat
     );
     eye.position.set(2.45, 2.4, side * 0.28);
-    horseGroup.add(eye);
+    horseModel.add(eye);
   }
 
   // Ears
@@ -283,7 +291,7 @@ function createHorse() {
     );
     ear.position.set(2.0, 2.8, side * 0.2);
     ear.castShadow = true;
-    horseGroup.add(ear);
+    horseModel.add(ear);
   }
 
   // Mane (thin boxes along neck and top of back)
@@ -297,7 +305,7 @@ function createHorse() {
     const my = 1.95 + t * 0.45;
     mane.position.set(mx, my, 0);
     mane.castShadow = true;
-    horseGroup.add(mane);
+    horseModel.add(mane);
   }
 
   // Tail (thin long box, angled down-back)
@@ -308,7 +316,7 @@ function createHorse() {
   tail.position.set(-1.6, 1.2, 0);
   tail.rotation.z = 0.5; // angle backward/down
   tail.castShadow = true;
-  horseGroup.add(tail);
+  horseModel.add(tail);
 
   // Legs (4 cylinders with hoof caps)
   const legDefs = [
@@ -342,7 +350,7 @@ function createHorse() {
     hoof.castShadow = true;
     legPivot.add(hoof);
 
-    horseGroup.add(legPivot);
+    horseModel.add(legPivot);
     legMeshes.push(legPivot);
   });
 
@@ -352,10 +360,20 @@ function createHorse() {
 
 // ========== CHALLENGES ==========
 function createChallenge() {
-  const dist = 15 + Math.random() * 30;
-  const angle = Math.random() * Math.PI * 2;
-  const cx = horsePos.x + Math.cos(angle) * dist;
-  const cz = horsePos.z + Math.sin(angle) * dist;
+  let cx, cz;
+  // Find a spot away from trees (try up to 20 times)
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const dist = 15 + Math.random() * 30;
+    const angle = Math.random() * Math.PI * 2;
+    cx = horsePos.x + Math.cos(angle) * dist;
+    cz = horsePos.z + Math.sin(angle) * dist;
+    // Check that no tree is within 8 units of the challenge center
+    const tooClose = treePositions.some(t => {
+      const dx = t.x - cx, dz = t.z - cz;
+      return Math.sqrt(dx * dx + dz * dz) < 8;
+    });
+    if (!tooClose) break;
+  }
 
   // Generate math problem
   const { question, answer } = generateProblem();
@@ -374,15 +392,15 @@ function createChallenge() {
   });
 
   const pillarLeft = new THREE.Mesh(pillarGeo, pillarMat);
-  pillarLeft.position.set(-4, 2, 0);
+  pillarLeft.position.set(-6, 2, 0);
   group.add(pillarLeft);
 
   const pillarRight = new THREE.Mesh(pillarGeo, pillarMat);
-  pillarRight.position.set(4, 2, 0);
+  pillarRight.position.set(6, 2, 0);
   group.add(pillarRight);
 
   // Top bar
-  const barGeo = new THREE.BoxGeometry(8.5, 0.2, 0.2);
+  const barGeo = new THREE.BoxGeometry(12.5, 0.2, 0.2);
   const bar = new THREE.Mesh(barGeo, pillarMat);
   bar.position.set(0, 4, 0);
   group.add(bar);
@@ -399,7 +417,7 @@ function createChallenge() {
   // 3 hay piles with answers
   const hayPiles = [];
   for (let i = 0; i < 3; i++) {
-    const hx = (i - 1) * 3; // -3, 0, 3
+    const hx = (i - 1) * 5; // -5, 0, 5
     const hayGroup = new THREE.Group();
     hayGroup.position.set(hx, 0, 0);
 
@@ -736,7 +754,7 @@ function handleAnswer(challenge, pile) {
   } else {
     // Wrong - let them try again
     totalAnswers++;
-    feedbackEl.textContent = '❌ Spróbuj inną kupkę!';
+    feedbackEl.textContent = '❌ Spróbuj inny stosik!';
     feedbackEl.style.color = '#FF5722';
     feedbackEl.style.display = 'block';
     challenge.active = true; // Keep active so they can try again
