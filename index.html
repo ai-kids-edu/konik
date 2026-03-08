@@ -609,10 +609,10 @@ function animateHorse(dt, moving) {
   legMeshes.forEach((legPivot) => {
     const phase = legPivot.userData.phase;
     if (moving) {
-      legPivot.rotation.x = Math.sin(walkTime + phase) * 0.4;
+      legPivot.rotation.z = Math.sin(walkTime + phase) * 0.4;
     } else {
       // Smoothly return to rest
-      legPivot.rotation.x *= 0.9;
+      legPivot.rotation.z *= 0.9;
     }
   });
 }
