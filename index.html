@@ -56,33 +56,64 @@ canvas { display: block; }
 }
 
 #intro {
-  position: fixed; inset: 0; background: rgba(0,20,5,0.92);
+  position: fixed; inset: 0;
+  background: linear-gradient(180deg, #1a4a1a 0%, #2d6b2d 30%, #4a8c3f 60%, #7ab648 80%, #a8d84a 100%);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   z-index: 100; color: #fff; text-align: center; padding: 20px;
+  overflow: hidden;
 }
-#intro h1 { font-size: 42px; margin-bottom: 10px; color: #FFD700; }
-#intro h2 { font-size: 20px; margin-bottom: 30px; color: #aaddaa; font-weight: normal; }
-#intro .instructions { font-size: 16px; color: #ccc; margin-bottom: 30px; line-height: 1.6; max-width: 400px; }
+#intro::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 20%, rgba(255,220,50,0.15) 0%, transparent 60%);
+  pointer-events: none;
+}
+#intro h1 {
+  font-size: 56px; margin-bottom: 8px; color: #FFD700;
+  text-shadow: 0 3px 15px rgba(0,0,0,0.4), 0 0 40px rgba(255,200,0,0.3);
+  animation: title-glow 3s ease-in-out infinite;
+}
+@keyframes title-glow {
+  0%, 100% { text-shadow: 0 3px 15px rgba(0,0,0,0.4), 0 0 40px rgba(255,200,0,0.2); }
+  50% { text-shadow: 0 3px 15px rgba(0,0,0,0.4), 0 0 60px rgba(255,200,0,0.4); }
+}
+#intro .horse-emoji { font-size: 100px; margin-bottom: 10px; animation: horse-bounce 2s ease-in-out infinite; }
+@keyframes horse-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
+}
+#intro h2 {
+  font-size: 22px; margin-bottom: 30px; color: #d4ffaa; font-weight: normal;
+  text-shadow: 0 1px 5px rgba(0,0,0,0.3);
+}
+#intro .instructions {
+  font-size: 17px; color: rgba(255,255,255,0.85); margin-bottom: 35px;
+  line-height: 1.8; max-width: 420px;
+}
+#intro .instructions b { color: #FFD700; }
 #intro button {
-  background: #4CAF50; color: #fff; border: none; padding: 16px 48px;
-  font-size: 22px; border-radius: 30px; cursor: pointer;
-  transition: transform 0.2s, background 0.2s;
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+  color: #333; border: none; padding: 20px 60px;
+  font-size: 28px; font-weight: bold; border-radius: 40px; cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 20px rgba(255,165,0,0.4);
+  text-transform: uppercase; letter-spacing: 2px;
 }
-#intro button:hover { background: #66BB6A; transform: scale(1.05); }
+#intro button:hover { transform: scale(1.08); box-shadow: 0 6px 30px rgba(255,165,0,0.6); }
+#intro button:active { transform: scale(0.98); }
 
 #joystick-area {
-  position: fixed; bottom: 20px; left: 20px; width: 140px; height: 140px;
+  position: fixed; bottom: 20px; left: 20px; width: 160px; height: 160px;
   z-index: 10; display: none;
 }
 #joystick-base {
-  width: 120px; height: 120px; border-radius: 50%;
-  background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3);
+  width: 140px; height: 140px; border-radius: 50%;
+  background: rgba(255,255,255,0.12); border: 3px solid rgba(255,255,255,0.25);
   position: absolute; bottom: 0; left: 0;
 }
 #joystick-thumb {
-  width: 50px; height: 50px; border-radius: 50%;
-  background: rgba(255,255,255,0.4);
-  position: absolute; bottom: 35px; left: 35px;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: rgba(255,255,255,0.35);
+  position: absolute; bottom: 40px; left: 40px;
   transition: none;
 }
 
@@ -123,14 +154,15 @@ canvas { display: block; }
 <body>
 
 <div id="intro">
-  <h1>🐴 Konik Matematyczny</h1>
-  <h2>Naucz się matematyki z laserówki!</h2>
+  <div class="horse-emoji">🐴</div>
+  <h1>Konik Matematyczny</h1>
+  <h2>Przygoda z liczeniem!</h2>
   <div class="instructions">
-    Steruj konikiem i podjeżdżaj do świecących bramek.<br>
-    Nad bramkami pojawi się zadanie matematyczne.<br>
-    Wjedź w wiaderko z prawidłową odpowiedzią!<br><br>
-    <b>Komputer:</b> WASD lub strzałki<br>
-    <b>Telefon:</b> joystick w rogu ekranu
+    Jedź konikiem do <b>świecących bramek</b><br>
+    Policz kropki i wjedź w dobre wiaderko!<br>
+    Zbieraj <b>jabłka</b> po drodze 🍎<br><br>
+    <b>Strzałki</b> lub <b>WASD</b> — sterowanie<br>
+    Na telefonie — joystick na ekranie
   </div>
   <button onclick="startGame()">GRAJ!</button>
 </div>
@@ -1684,7 +1716,7 @@ function createChallenge() {
     labelBack.rotation.y = Math.PI;
     bucketPivot.add(labelBack);
 
-    hayGroup.scale.set(1.6, 1.6, 1.6); // bigger buckets
+    hayGroup.scale.set(1.1, 1.1, 1.1);
     group.add(hayGroup);
     hayPiles.push({
       localX: hx, answer: ansVal, correct: ansVal === answer,
