@@ -1736,7 +1736,7 @@ function generateWrongAnswers(correct) {
   const candidates = [];
   // Allow 0 only at higher levels (maxNumber > 5), never negative
   const minAnswer = maxNumber > 5 ? 0 : 1;
-  for (let i = Math.max(minAnswer, correct - 3); i <= correct + 3; i++) {
+  for (let i = Math.max(minAnswer, correct - 3); i <= Math.min(correct + 3, maxNumber); i++) {
     if (i !== correct && i >= minAnswer) candidates.push(i);
   }
   // Shuffle and pick 2
