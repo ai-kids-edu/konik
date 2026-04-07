@@ -1,17 +1,17 @@
 # Konik Matematyczny — Pytania dla grup
 
 ## Grupa 1
-**Co chcecie zeby konik robil na farmie oprócz zadanek z matmy?**
-(np. zbierac jablka, karmic zwierzeta, budowac cos, szukac skarbow...)
+**Co konik powinien zdobywac i zbierac w swiecie gry?**
+(np. jablka, gwiazdki, kwiaty, klucze do bram, puzzle...)
 
 ## Grupa 2
-**Jak chcecie zeby dziecko widzialo ze dobrze odpowiedzialo?**
-(np. fajerwerki, taniec konika, nowe zwierzatko, piosenka...)
+**Czego moglyby chciec od nas postacie na farmie?**
+(np. farmer prosi o 3 jablka, krowa jest glodna, pies zgubil piłke...)
 
 ## Grupa 3
-**Co chcecie zeby mozna bylo odkrywac w swiecie gry?**
-(np. nowe miejsca, ukryte niespodzianki, inne zwierzeta, magiczne rzeczy...)
+**Co fajnego powinno sie dziac jak dziecko dobrze odpowie?**
+(np. konik tancuje, nowe zwierzatko, otwiera sie nowe miejsce...)
 
 ## Grupa 4
-**Czego jeszcze chcecie zeby konik uczyl oprócz liczenia?**
-(np. kolory, ksztalty, literki, nazwy zwierzat, cos innego...)
+**Czego jeszcze konik moze uczyc oprócz liczenia?**
+(np. kolory, ksztalty, nazwy zwierzat, pory roku...)
