@@ -57,49 +57,64 @@ canvas { display: block; }
 
 #intro {
   position: fixed; inset: 0;
-  background: linear-gradient(180deg, #1a4a1a 0%, #2d6b2d 30%, #4a8c3f 60%, #7ab648 80%, #a8d84a 100%);
+  background: linear-gradient(170deg, #87CEEB 0%, #a8e6ff 25%, #90d48a 50%, #5aad3a 75%, #3a7a25 100%);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   z-index: 100; color: #fff; text-align: center; padding: 20px;
-  overflow: hidden;
+  overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif;
 }
 #intro::before {
   content: ''; position: absolute; inset: 0;
-  background: radial-gradient(ellipse at 50% 20%, rgba(255,220,50,0.15) 0%, transparent 60%);
+  background:
+    radial-gradient(ellipse at 20% 15%, rgba(255,255,255,0.3) 0%, transparent 40%),
+    radial-gradient(ellipse at 80% 80%, rgba(255,220,50,0.1) 0%, transparent 50%);
   pointer-events: none;
 }
-#intro h1 {
-  font-size: 56px; margin-bottom: 8px; color: #FFD700;
-  text-shadow: 0 3px 15px rgba(0,0,0,0.4), 0 0 40px rgba(255,200,0,0.3);
-  animation: title-glow 3s ease-in-out infinite;
+/* Floating clouds */
+#intro .clouds {
+  position: absolute; top: 0; left: 0; right: 0; height: 40%; pointer-events: none; overflow: hidden;
 }
-@keyframes title-glow {
-  0%, 100% { text-shadow: 0 3px 15px rgba(0,0,0,0.4), 0 0 40px rgba(255,200,0,0.2); }
-  50% { text-shadow: 0 3px 15px rgba(0,0,0,0.4), 0 0 60px rgba(255,200,0,0.4); }
+#intro .cloud {
+  position: absolute; background: rgba(255,255,255,0.6); border-radius: 50%;
+  filter: blur(8px); animation: cloud-drift linear infinite;
 }
-#intro .horse-emoji { font-size: 100px; margin-bottom: 10px; animation: horse-bounce 2s ease-in-out infinite; }
+@keyframes cloud-drift { from { transform: translateX(-150px); } to { transform: translateX(calc(100vw + 150px)); } }
+
+#intro .horse-emoji {
+  font-size: 120px; margin-bottom: 5px;
+  animation: horse-bounce 2.5s ease-in-out infinite;
+  filter: drop-shadow(0 8px 20px rgba(0,0,0,0.2));
+}
 @keyframes horse-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-15px); }
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-20px) rotate(2deg); }
+}
+#intro h1 {
+  font-size: 52px; margin-bottom: 6px; color: #fff;
+  text-shadow: 0 3px 0 #2a7a1a, 0 6px 20px rgba(0,0,0,0.3);
+  letter-spacing: 1px;
 }
 #intro h2 {
-  font-size: 22px; margin-bottom: 30px; color: #d4ffaa; font-weight: normal;
-  text-shadow: 0 1px 5px rgba(0,0,0,0.3);
+  font-size: 20px; margin-bottom: 28px; color: rgba(255,255,255,0.9); font-weight: normal;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.2);
 }
 #intro .instructions {
-  font-size: 17px; color: rgba(255,255,255,0.85); margin-bottom: 35px;
-  line-height: 1.8; max-width: 420px;
+  font-size: 16px; color: rgba(255,255,255,0.9); margin-bottom: 30px;
+  line-height: 1.9; max-width: 380px;
+  background: rgba(0,0,0,0.15); border-radius: 16px; padding: 16px 24px;
+  backdrop-filter: blur(4px);
 }
-#intro .instructions b { color: #FFD700; }
+#intro .instructions b { color: #ffe066; }
 #intro button {
-  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-  color: #333; border: none; padding: 20px 60px;
-  font-size: 28px; font-weight: bold; border-radius: 40px; cursor: pointer;
+  background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 50%, #FFD700 100%);
+  color: #fff; border: none; padding: 22px 70px;
+  font-size: 32px; font-weight: bold; border-radius: 50px; cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 4px 20px rgba(255,165,0,0.4);
-  text-transform: uppercase; letter-spacing: 2px;
+  box-shadow: 0 6px 25px rgba(255,100,50,0.4);
+  text-transform: uppercase; letter-spacing: 3px;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
-#intro button:hover { transform: scale(1.08); box-shadow: 0 6px 30px rgba(255,165,0,0.6); }
-#intro button:active { transform: scale(0.98); }
+#intro button:hover { transform: scale(1.08); box-shadow: 0 8px 35px rgba(255,100,50,0.6); }
+#intro button:active { transform: scale(0.95); }
 
 #joystick-area {
   position: fixed; bottom: 20px; left: 20px; width: 160px; height: 160px;
@@ -154,15 +169,20 @@ canvas { display: block; }
 <body>
 
 <div id="intro">
+  <div class="clouds">
+    <div class="cloud" style="width:180px;height:60px;top:8%;left:-100px;animation-duration:25s;animation-delay:0s;"></div>
+    <div class="cloud" style="width:140px;height:50px;top:15%;left:-80px;animation-duration:30s;animation-delay:5s;"></div>
+    <div class="cloud" style="width:200px;height:70px;top:5%;left:-120px;animation-duration:35s;animation-delay:12s;"></div>
+  </div>
   <div class="horse-emoji">🐴</div>
   <h1>Konik Matematyczny</h1>
   <h2>Przygoda z liczeniem!</h2>
   <div class="instructions">
-    Jedź konikiem do <b>świecących bramek</b><br>
-    Policz kropki i wjedź w dobre wiaderko!<br>
-    Zbieraj <b>jabłka</b> po drodze 🍎<br><br>
-    <b>Strzałki</b> lub <b>WASD</b> — sterowanie<br>
-    Na telefonie — joystick na ekranie
+    Galopuj konikiem po magicznej łące!<br>
+    Szukaj <b>świecących bramek</b> z zadaniami<br>
+    Policz i wjedź w <b>dobre wiaderko</b>!<br>
+    Zbieraj 🍎 <b>jabłka</b> po drodze!<br><br>
+    🎮 Steruj <b>strzałkami</b> na klawiaturze
   </div>
   <button onclick="startGame()">GRAJ!</button>
 </div>
@@ -2399,29 +2419,47 @@ function update() {
   requestAnimationFrame(update);
 }
 
-function animateBucketTip(pile, isCorrect) {
+function animateBucketTip(pile, isCorrect, challenge) {
   if (pile.revealed) return;
   pile.revealed = true;
   const pivot = pile.bucketPivot;
   const lid = pile.lidGroup;
   const startTime = Date.now();
 
+  // Calculate tip direction toward the horse (in challenge-local space)
+  let tipDirX = 0, tipDirZ = 1; // default: +Z
+  if (challenge) {
+    const bucketWorldX = challenge.position.x + pile.localX;
+    const bucketWorldZ = challenge.position.z;
+    const dx = horsePos.x - bucketWorldX;
+    const dz = horsePos.z - bucketWorldZ;
+    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+    tipDirX = dx / len;
+    tipDirZ = dz / len;
+  }
+
   function animate() {
     const elapsed = (Date.now() - startTime) / 1000;
 
-    // Phase 1 (0-0.3s): Lid pops off toward player
+    // Phase 1 (0-0.3s): Lid pops off toward horse
     const lidT = Math.min(elapsed / 0.3, 1);
     lid.position.y = 1.0 + lidT * 2.0;
-    lid.position.z = lidT * 0.6;
-    lid.rotation.x = lidT * 1.0;
-    lid.rotation.z = lidT * 0.4;
+    lid.position.x = lidT * 0.6 * tipDirX;
+    lid.position.z = lidT * 0.6 * tipDirZ;
+    lid.rotation.x = lidT * tipDirZ;
+    lid.rotation.z = -lidT * tipDirX;
 
-    // Phase 2 (0.15-0.6s): Bucket tips TOWARD player (+Z)
+    // Phase 2 (0.15-0.6s): Bucket tips TOWARD horse
     if (elapsed > 0.15) {
       const tipT = Math.min((elapsed - 0.15) / 0.45, 1);
       const eased = 1 - Math.pow(1 - tipT, 2);
-      pivot.rotation.x = eased * (Math.PI / 2.5);
-      pivot.position.z = eased * 0.4;
+      // Tip using atan2 to rotate toward horse direction
+      const tipAngle = Math.atan2(tipDirX, tipDirZ);
+      pivot.rotation.set(0, 0, 0);
+      pivot.rotateY(tipAngle);
+      pivot.rotateX(eased * (Math.PI / 2.5));
+      pivot.position.x = eased * 0.4 * tipDirX;
+      pivot.position.z = eased * 0.4 * tipDirZ;
       pivot.position.y = eased * 0.2;
     }
 
@@ -2471,7 +2509,7 @@ function handleAnswer(challenge, pile) {
   const questionBar = document.getElementById('question-bar');
 
   // Animate bucket tipping over
-  animateBucketTip(pile, pile.correct);
+  animateBucketTip(pile, pile.correct, challenge);
 
   if (pile.correct) {
     challenge.active = false;
