@@ -677,7 +677,8 @@ function createTree(x, z) {
   }
 
   // ~30% of broadleaf trees have apple models near base
-  if (Math.random() < 0.3 && !key.includes('pine')) {
+  // Apples only on common trees (not pine, birch, willow, palm)
+  if (Math.random() < 0.3 && key.startsWith('tree_')) {
     const appleCount = 2 + Math.floor(Math.random() * 3);
     for (let ai = 0; ai < appleCount; ai++) {
       const angle = (ai / appleCount) * Math.PI * 2 + Math.random() * 0.5;
@@ -1710,19 +1711,43 @@ function createChallenge() {
 
     if (showDots && ansVal > 0) {
       const dColor = problemData.dotColor || '#ff5555';
-      const cols = ansVal <= 3 ? ansVal : Math.ceil(Math.sqrt(ansVal));
-      const rows = Math.ceil(ansVal / cols);
-      const dotR = ansVal <= 4 ? 14 : 10;
-      const spacing = dotR * 2.8;
-      const ox = 64 - (cols - 1) * spacing / 2;
-      const oy = 64 - (rows - 1) * spacing / 2;
+      const dotR = ansVal <= 4 ? 14 : (ansVal <= 6 ? 11 : 9);
+      const spacing = dotR * 2.6;
       aCtx.fillStyle = dColor;
-      for (let d = 0; d < ansVal; d++) {
-        const col = d % cols;
-        const row = Math.floor(d / cols);
-        aCtx.beginPath();
-        aCtx.arc(ox + col * spacing, oy + row * spacing, dotR, 0, Math.PI * 2);
-        aCtx.fill();
+
+      if (ansVal <= 6) {
+        // Dice-like patterns for 1-6 (well-known, centered)
+        const patterns = {
+          1: [[0,0]],
+          2: [[-1,-1],[1,1]],
+          3: [[-1,-1],[0,0],[1,1]],
+          4: [[-1,-1],[1,-1],[-1,1],[1,1]],
+          5: [[-1,-1],[1,-1],[0,0],[-1,1],[1,1]],
+          6: [[-1,-1],[1,-1],[-1,0],[1,0],[-1,1],[1,1]],
+        };
+        const pts = patterns[ansVal];
+        for (const [px, py] of pts) {
+          aCtx.beginPath();
+          aCtx.arc(64 + px * spacing * 0.7, 64 + py * spacing * 0.7, dotR, 0, Math.PI * 2);
+          aCtx.fill();
+        }
+      } else {
+        // Grid for 7+
+        const cols = Math.ceil(Math.sqrt(ansVal));
+        const rows = Math.ceil(ansVal / cols);
+        const ox = 64 - (cols - 1) * spacing / 2;
+        const oy = 64 - (rows - 1) * spacing / 2;
+        for (let d = 0; d < ansVal; d++) {
+          const col = d % cols;
+          const row = Math.floor(d / cols);
+          // Center last row if not full
+          const colsInRow = (row === rows - 1 && ansVal % cols !== 0) ? ansVal % cols : cols;
+          const rowOx = 64 - (colsInRow - 1) * spacing / 2;
+          const actualCol = (row === rows - 1 && ansVal % cols !== 0) ? d % cols : col;
+          aCtx.beginPath();
+          aCtx.arc(rowOx + actualCol * spacing, oy + row * spacing, dotR, 0, Math.PI * 2);
+          aCtx.fill();
+        }
       }
     } else {
       // Number (white on dark)
@@ -2444,36 +2469,40 @@ function animateBucketTip(pile, isCorrect, challenge) {
   function animate() {
     const elapsed = (Date.now() - startTime) / 1000;
 
-    // Phase 1 (0-0.3s): Lid pops off upward
-    const lidT = Math.min(elapsed / 0.3, 1);
-    lid.position.y = 1.0 + lidT * 2.5;
-    lid.position.x = lidT * 0.5;
-    lid.rotation.z = lidT * 1.5;
-
-    // Phase 2 (0.15-0.7s): Bucket tips sideways (rolls to the side)
-    // But the opening ends up facing toward the horse
-    if (elapsed > 0.15) {
-      const tipT = Math.min((elapsed - 0.15) / 0.55, 1);
-      const eased = 1 - Math.pow(1 - tipT, 2);
-      // Roll sideways
-      pivot.rotation.z = eased * (Math.PI / 2);
-      pivot.position.x = eased * 0.8; // roll to the side
-      pivot.position.y = eased * 0.15;
+    // Phase 1 (0-0.2s): Lid pops up slightly then falls to the side
+    if (elapsed < 0.5) {
+      const lidT = Math.min(elapsed / 0.2, 1);
+      lid.position.y = 1.0 + lidT * 1.2;
+      lid.position.x = lidT * 0.3;
+    }
+    // Lid falls with gravity and tumbles to rest
+    if (elapsed >= 0.2) {
+      const fallT = elapsed - 0.2;
+      lid.position.y = Math.max(0.04, 2.2 - fallT * fallT * 10);
+      lid.position.x = 0.3 + fallT * 1.5; // slides sideways
+      lid.rotation.z = fallT * 3; // tumbles
+      lid.rotation.x = fallT * 1.5;
     }
 
-    // Phase 3 (0.5s+): Carrots spill from opening toward horse
+    // Phase 2 (0.1-0.8s): Bucket tips over and rolls away to the side
+    if (elapsed > 0.1) {
+      const tipT = Math.min((elapsed - 0.1) / 0.7, 1);
+      const eased = 1 - Math.pow(1 - tipT, 2);
+      pivot.rotation.z = eased * (Math.PI * 0.55); // tip past 90deg
+      pivot.position.x = eased * 1.5; // roll away to the side
+      pivot.position.y = Math.sin(eased * Math.PI) * 0.2; // slight bounce arc
+      // Keep rolling after tipping
+      if (tipT > 0.7) {
+        pivot.position.x += (tipT - 0.7) * 2; // extra roll
+      }
+    }
+
+    // Phase 3 (0.5s+): Carrots appear on ground
     if (isCorrect && elapsed > 0.5) {
       pile.carrotsGroup.visible = true;
     }
 
-    // Lid falls after popping (gravity)
-    if (elapsed > 0.3) {
-      const fallT = elapsed - 0.3;
-      lid.position.y = 3.0 - fallT * fallT * 8; // gravity
-      if (lid.position.y < 0.05) lid.position.y = 0.05;
-    }
-
-    if (elapsed < 1.2) {
+    if (elapsed < 1.5) {
       requestAnimationFrame(animate);
     }
   }
