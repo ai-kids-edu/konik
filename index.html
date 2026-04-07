@@ -677,14 +677,17 @@ function createTree(x, z) {
   }
 
   // ~30% of broadleaf trees have apple models near base
-  // Apples only on common trees (not pine, birch, willow, palm)
-  if (Math.random() < 0.3 && key.startsWith('tree_')) {
-    const appleCount = 2 + Math.floor(Math.random() * 3);
+  // Apples only on tree_1 (our "apple tree"), 30% chance
+  if (key === 'tree_1' && Math.random() < 0.3) {
+    const appleCount = 2 + Math.floor(Math.random() * 2);
+    // Crown center ~3.5m up at scale 2.0, radius ~1.2m
+    const crownCenterY = h + scale * 1.8;
+    const crownR = scale * 0.6;
     for (let ai = 0; ai < appleCount; ai++) {
-      const angle = (ai / appleCount) * Math.PI * 2 + Math.random() * 0.5;
-      const ax = x + Math.cos(angle) * 1.5;
-      const az = z + Math.sin(angle) * 1.5;
-      const ay = h + 1.5 + Math.random() * 1.0;
+      const angle = (ai / appleCount) * Math.PI * 2 + Math.random() * 0.8;
+      const ax = x + Math.cos(angle) * crownR;
+      const az = z + Math.sin(angle) * crownR;
+      const ay = crownCenterY - Math.random() * crownR * 0.5;
       const appleMesh = new THREE.Mesh(
         new THREE.SphereGeometry(0.25, 8, 6),
         new THREE.MeshStandardMaterial({ color: Math.random() > 0.3 ? 0xdd2222 : 0x88cc22, roughness: 0.3 })
@@ -1669,24 +1672,28 @@ function createChallenge() {
     // Carrots spilling (hidden until correct reveal)
     const carrotsGroup = new THREE.Group();
     carrotsGroup.visible = false;
-    for (let c = 0; c < 8; c++) {
-      const carrotGroup = new THREE.Group();
-      const carrot = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.6, 6), new THREE.MeshStandardMaterial({ color: 0xff8c00, roughness: 0.5 }));
-      carrotGroup.add(carrot);
-      const top = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 4), new THREE.MeshStandardMaterial({ color: 0x33aa33 }));
-      top.position.y = 0.35;
-      carrotGroup.add(top);
-      // Fan out from bucket center, spread wide on the ground
-      const angle = (c / 8) * Math.PI * 2;
-      const spread = 0.5 + Math.random() * 1.0;
-      carrotGroup.position.set(
-        Math.cos(angle) * spread,
-        0.08,
-        Math.sin(angle) * spread
+    // Carrots scattered in front of bucket (toward +Z where horse approaches)
+    for (let c = 0; c < 6; c++) {
+      // Orange carrot body — laying on ground
+      const carrot = new THREE.Mesh(
+        new THREE.ConeGeometry(0.08, 0.5, 6),
+        new THREE.MeshStandardMaterial({ color: 0xff8c00, roughness: 0.5 })
       );
-      // Lay flat on ground — cone tip pointing sideways
-      carrotGroup.rotation.set(0, Math.random() * Math.PI * 2, Math.PI / 2 + (Math.random() - 0.5) * 0.4);
-      carrotsGroup.add(carrotGroup);
+      // Green top
+      const top = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.01, 0.06, 0.15, 4),
+        new THREE.MeshStandardMaterial({ color: 0x33aa33 })
+      );
+      top.position.y = 0.3;
+      carrot.add(top);
+      // Position: spread in a patch 1-2m in front of bucket
+      const spreadX = (Math.random() - 0.5) * 1.5;
+      const spreadZ = 1.0 + Math.random() * 1.0; // in front (+Z)
+      carrot.position.set(spreadX, 0.05, spreadZ);
+      // Lay completely flat on ground (tip pointing random horizontal direction)
+      carrot.rotation.x = Math.PI / 2;
+      carrot.rotation.z = Math.random() * Math.PI * 2;
+      carrotsGroup.add(carrot);
     }
     hayGroup.add(carrotsGroup);
 
@@ -2469,20 +2476,12 @@ function animateBucketTip(pile, isCorrect, challenge) {
   function animate() {
     const elapsed = (Date.now() - startTime) / 1000;
 
-    // Phase 1 (0-0.2s): Lid pops up slightly then falls to the side
-    if (elapsed < 0.5) {
-      const lidT = Math.min(elapsed / 0.2, 1);
-      lid.position.y = 1.0 + lidT * 1.2;
-      lid.position.x = lidT * 0.3;
-    }
-    // Lid falls with gravity and tumbles to rest
-    if (elapsed >= 0.2) {
-      const fallT = elapsed - 0.2;
-      lid.position.y = Math.max(0.04, 2.2 - fallT * fallT * 10);
-      lid.position.x = 0.3 + fallT * 1.5; // slides sideways
-      lid.rotation.z = fallT * 3; // tumbles
-      lid.rotation.x = fallT * 1.5;
-    }
+    // Lid: slides off to the side and lands flat on ground
+    const lidT = Math.min(elapsed / 0.6, 1);
+    const lidEase = 1 - Math.pow(1 - lidT, 2);
+    lid.position.x = lidEase * 1.5;
+    lid.position.y = 1.0 + Math.sin(lidT * Math.PI) * 0.5 - lidEase * 0.96; // arc then land at ~0.04
+    if (lid.position.y < 0.04) lid.position.y = 0.04;
 
     // Phase 2 (0.1-0.8s): Bucket tips over and rolls away to the side
     if (elapsed > 0.1) {
