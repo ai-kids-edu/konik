@@ -2620,8 +2620,11 @@ function handleAnswer(challenge, pile) {
     playHorseAnimation('eating', 2500);
 
     // Carrots disappear one by one with shrink animation during eating
-    const carrotMeshes = pile.carrotsGroup.visible ? pile.carrotsGroup.children.slice() : [];
-    const eatDelay = 2000 / (carrotMeshes.length + 1); // spread across eating duration
+    // Always grab children — carrotsGroup becomes visible later in bucket animation
+    const carrotMeshes = pile.carrotsGroup.children.slice();
+    // Start shrinking after carrots become visible (0.5s) + spread across 1.5s
+    const shrinkStartMs = 600;
+    const eatDelay = 1500 / (carrotMeshes.length + 1);
     carrotMeshes.forEach((carrot, idx) => {
       setTimeout(() => {
         // Shrink and vanish
@@ -2635,7 +2638,7 @@ function handleAnswer(challenge, pile) {
           requestAnimationFrame(shrinkCarrot);
         }
         shrinkCarrot();
-      }, (idx + 1) * eatDelay);
+      }, shrinkStartMs + (idx + 1) * eatDelay);
     });
 
     setTimeout(() => {
