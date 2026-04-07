@@ -1674,25 +1674,23 @@ function createChallenge() {
     carrotsGroup.visible = false;
     // Carrots scattered in front of bucket (toward +Z where horse approaches)
     for (let c = 0; c < 6; c++) {
-      // Orange carrot body — laying on ground
       const carrot = new THREE.Mesh(
-        new THREE.ConeGeometry(0.08, 0.5, 6),
-        new THREE.MeshStandardMaterial({ color: 0xff8c00, roughness: 0.5 })
+        new THREE.ConeGeometry(0.12, 0.7, 6),
+        new THREE.MeshStandardMaterial({ color: 0xff9922, roughness: 0.4, emissive: 0x331100, emissiveIntensity: 0.1 })
       );
-      // Green top
       const top = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.01, 0.06, 0.15, 4),
-        new THREE.MeshStandardMaterial({ color: 0x33aa33 })
+        new THREE.ConeGeometry(0.08, 0.25, 4),
+        new THREE.MeshStandardMaterial({ color: 0x22bb22 })
       );
-      top.position.y = 0.3;
+      top.position.y = 0.4;
       carrot.add(top);
-      // Position: spread in a patch 1-2m in front of bucket
-      const spreadX = (Math.random() - 0.5) * 1.5;
-      const spreadZ = 1.0 + Math.random() * 1.0; // in front (+Z)
-      carrot.position.set(spreadX, 0.05, spreadZ);
-      // Lay completely flat on ground (tip pointing random horizontal direction)
-      carrot.rotation.x = Math.PI / 2;
-      carrot.rotation.z = Math.random() * Math.PI * 2;
+      // Spread in front of bucket
+      const spreadX = (Math.random() - 0.5) * 1.2;
+      const spreadZ = 0.8 + Math.random() * 1.2;
+      carrot.position.set(spreadX, 0.15, spreadZ);
+      // Tilted ~45deg — sticking up from ground, visible!
+      carrot.rotation.x = Math.PI / 4 + (Math.random() - 0.5) * 0.4;
+      carrot.rotation.y = Math.random() * Math.PI * 2;
       carrotsGroup.add(carrot);
     }
     hayGroup.add(carrotsGroup);
@@ -1815,10 +1813,13 @@ function generateProblem() {
     b = 1 + Math.floor(Math.random() * Math.max(1, maxNumber - a));
     answer = a + b;
   } else {
-    // Cap subtraction: level 2-3 max 4, then maxNumber
+    // Subtraction: a must be > b, result always >= 1
     const subMax = level <= 3 ? Math.min(maxNumber, 4) : maxNumber;
-    a = 2 + Math.floor(Math.random() * (subMax - 1));
+    a = 2 + Math.floor(Math.random() * Math.max(1, subMax - 2));
     b = 1 + Math.floor(Math.random() * Math.max(1, a - 1));
+    // Safety: ensure a > b
+    if (b >= a) b = a - 1;
+    if (b < 1) b = 1;
     answer = a - b;
   }
   const question = `${a} ${type === 'add' ? '+' : '−'} ${b} = ?`;
@@ -2459,49 +2460,54 @@ function animateBucketTip(pile, isCorrect, challenge) {
   pile.revealed = true;
   const pivot = pile.bucketPivot;
   const lid = pile.lidGroup;
-  const startTime = Date.now();
+  const hayGroup = pivot.parent; // hayGroup is parent of bucketPivot
 
-  // Calculate tip direction toward the horse (in challenge-local space)
-  let tipDirX = 0, tipDirZ = 1; // default: +Z
-  if (challenge) {
-    const bucketWorldX = challenge.position.x + pile.localX;
-    const bucketWorldZ = challenge.position.z;
-    const dx = horsePos.x - bucketWorldX;
-    const dz = horsePos.z - bucketWorldZ;
-    const len = Math.sqrt(dx * dx + dz * dz) || 1;
-    tipDirX = dx / len;
-    tipDirZ = dz / len;
-  }
+  // Detach lid from rotating pivot → attach to stable hayGroup
+  const lidWorldPos = new THREE.Vector3();
+  lid.getWorldPosition(lidWorldPos);
+  pivot.remove(lid);
+  hayGroup.add(lid);
+  // Set lid position in hayGroup local space
+  lid.position.set(0, 1.0, 0);
+  lid.rotation.set(0, 0, 0);
+
+  const startTime = Date.now();
 
   function animate() {
     const elapsed = (Date.now() - startTime) / 1000;
 
-    // Lid: slides off to the side and lands flat on ground
+    // Step 1: Lid pops up and lands to the side
     const lidT = Math.min(elapsed / 0.6, 1);
-    const lidEase = 1 - Math.pow(1 - lidT, 2);
-    lid.position.x = lidEase * 1.5;
-    lid.position.y = 1.0 + Math.sin(lidT * Math.PI) * 0.5 - lidEase * 0.96; // arc then land at ~0.04
+    lid.position.x = lidT * 1.5;
+    lid.position.y = 1.0 + Math.sin(lidT * Math.PI) * 0.6 - lidT * 0.96;
     if (lid.position.y < 0.04) lid.position.y = 0.04;
+    lid.rotation.z = lidT * 0.2;
 
-    // Phase 2 (0.1-0.8s): Bucket tips over and rolls away to the side
-    if (elapsed > 0.1) {
-      const tipT = Math.min((elapsed - 0.1) / 0.7, 1);
+    // Step 2 (0.1-0.5s): Bucket tips FORWARD (opening toward horse = +Z)
+    if (elapsed > 0.1 && elapsed < 0.8) {
+      const tipT = Math.min((elapsed - 0.1) / 0.4, 1);
       const eased = 1 - Math.pow(1 - tipT, 2);
-      pivot.rotation.z = eased * (Math.PI * 0.55); // tip past 90deg
-      pivot.position.x = eased * 1.5; // roll away to the side
-      pivot.position.y = Math.sin(eased * Math.PI) * 0.2; // slight bounce arc
-      // Keep rolling after tipping
-      if (tipT > 0.7) {
-        pivot.position.x += (tipT - 0.7) * 2; // extra roll
-      }
+      pivot.rotation.x = eased * (Math.PI * 0.45); // tip forward
+      pivot.position.z = eased * 0.3; // shift forward slightly
+      pivot.position.y = eased * 0.1;
     }
 
-    // Phase 3 (0.5s+): Carrots appear on ground
-    if (isCorrect && elapsed > 0.5) {
+    // Step 3 (0.5-1.0s): Bucket keeps falling and rolls to the side
+    if (elapsed > 0.5) {
+      const rollT = Math.min((elapsed - 0.5) / 0.5, 1);
+      const rollEase = 1 - Math.pow(1 - rollT, 2);
+      pivot.rotation.x = Math.PI * 0.45 + rollEase * 0.15; // tip a bit more
+      pivot.rotation.z = rollEase * (Math.PI * 0.3); // roll sideways
+      pivot.position.x = -rollEase * 0.8; // slide to side
+      pivot.position.z = 0.3 + rollEase * 0.3;
+    }
+
+    // Step 4: Carrots visible once bucket opening faces horse
+    if (isCorrect && elapsed > 0.35) {
       pile.carrotsGroup.visible = true;
     }
 
-    if (elapsed < 1.5) {
+    if (elapsed < 1.3) {
       requestAnimationFrame(animate);
     }
   }
@@ -2553,19 +2559,21 @@ function handleAnswer(challenge, pile) {
     });
     updateDifficulty();
 
-    // Step back from bucket, then face it and eat
-    const bucketWorldX = challenge.position.x + pile.localX;
-    const bucketWorldZ = challenge.position.z;
-    const dx = bucketWorldX - horsePos.x;
-    const dz = bucketWorldZ - horsePos.z;
+    // Carrots spill in front of the chosen bucket (+Z in hayGroup space)
+    // = challenge.position + pile.localX on X, challenge.position.z + ~1.5 on Z
+    const carrotAreaX = challenge.position.x + pile.localX;
+    const carrotAreaZ = challenge.position.z + 1.5; // where carrots land
+
+    // Position horse 2m behind the carrot area, facing them
+    const dx = carrotAreaX - horsePos.x;
+    const dz = carrotAreaZ - horsePos.z;
     const dist = Math.sqrt(dx * dx + dz * dz) || 1;
-    // Push horse back 2.5m from bucket
-    horsePos.x = bucketWorldX - (dx / dist) * 2.5;
-    horsePos.z = bucketWorldZ - (dz / dist) * 2.5;
+    horsePos.x = carrotAreaX - (dx / dist) * 2.0;
+    horsePos.z = carrotAreaZ - (dz / dist) * 2.0;
     horsePos.y = getTerrainHeight(horsePos.x, horsePos.z);
-    // Face toward bucket (recalculate from new position)
-    const dx2 = bucketWorldX - horsePos.x;
-    const dz2 = bucketWorldZ - horsePos.z;
+    // Face the carrots
+    const dx2 = carrotAreaX - horsePos.x;
+    const dz2 = carrotAreaZ - horsePos.z;
     horseAngle = Math.atan2(dx2, dz2);
     horseGroup.position.copy(horsePos);
     horseGroup.rotation.y = horseAngle;
