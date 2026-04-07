@@ -1492,57 +1492,78 @@ function createChallenge() {
   signCanvas.height = 128;
   const sCtx = signCanvas.getContext('2d');
 
-  // Wooden board background
-  sCtx.fillStyle = '#f5e6c8';
+  // Dark board background (like HUD style)
+  sCtx.fillStyle = 'rgba(0, 0, 0, 0.82)';
   sCtx.beginPath();
-  sCtx.roundRect(4, 4, 504, 120, 12);
+  sCtx.roundRect(4, 4, 504, 120, 16);
   sCtx.fill();
-  sCtx.strokeStyle = '#8B6530';
-  sCtx.lineWidth = 4;
+  sCtx.strokeStyle = 'rgba(255, 220, 50, 0.5)';
+  sCtx.lineWidth = 3;
   sCtx.stroke();
 
-  if (isVisual) {
-    const dotR = Math.min(18, Math.floor(200 / (numA + numB)));
-    const gap = dotR * 2.6;
-    const opW = 36;
-    const totalW = numA * gap + opW + numB * gap + 70;
-    let x = (512 - totalW) / 2 + dotR;
+  sCtx.textAlign = 'center';
+  sCtx.textBaseline = 'middle';
 
-    sCtx.fillStyle = dotColor;
+  if (isVisual) {
+    // Calculate sizes to fit
+    const maxDots = Math.max(numA, numB);
+    const dotR = Math.min(16, Math.floor(160 / (maxDots + 1)));
+    const dotGap = dotR * 2.4;
+    const opGap = 44; // space for operator
+
+    // Total width: dotsA + op + dotsB + op + "?"
+    const wA = numA * dotGap;
+    const wB = numB * dotGap;
+    const wEq = 60;
+    const totalW = wA + opGap + wB + opGap + wEq;
+    const startX = (512 - totalW) / 2;
+
+    // Draw group A
     for (let d = 0; d < numA; d++) {
+      const cx = startX + d * dotGap + dotR;
+      sCtx.fillStyle = dotColor;
       sCtx.beginPath();
-      sCtx.arc(x + d * gap, 64, dotR, 0, Math.PI * 2);
+      sCtx.arc(cx, 64, dotR, 0, Math.PI * 2);
       sCtx.fill();
-      sCtx.strokeStyle = '#333'; sCtx.lineWidth = 2; sCtx.stroke();
     }
-    x += numA * gap;
-    sCtx.fillStyle = '#444';
-    sCtx.font = 'bold 48px Arial';
-    sCtx.textAlign = 'center'; sCtx.textBaseline = 'middle';
-    sCtx.fillText(opType === 'add' ? '+' : '−', x + opW/2, 64);
-    x += opW;
-    sCtx.fillStyle = dotColor;
+
+    // Operator
+    const opX = startX + wA + opGap / 2;
+    sCtx.fillStyle = '#fff';
+    sCtx.font = 'bold 44px Arial';
+    sCtx.fillText(opType === 'add' ? '+' : '−', opX, 64);
+
+    // Draw group B
+    const bStart = startX + wA + opGap;
     for (let d = 0; d < numB; d++) {
+      const cx = bStart + d * dotGap + dotR;
+      sCtx.fillStyle = dotColor;
       sCtx.beginPath();
-      sCtx.arc(x + d * gap, 64, dotR, 0, Math.PI * 2);
+      sCtx.arc(cx, 64, dotR, 0, Math.PI * 2);
       sCtx.fill();
-      sCtx.strokeStyle = '#333'; sCtx.lineWidth = 2; sCtx.stroke();
     }
-    x += numB * gap;
-    sCtx.fillStyle = '#444';
-    sCtx.fillText('= ?', x + 25, 64);
+
+    // = ?
+    const eqX = bStart + wB + opGap / 2 + 10;
+    sCtx.fillStyle = '#fff';
+    sCtx.fillText('= ?', eqX, 64);
   } else {
-    sCtx.fillStyle = '#333';
-    sCtx.font = 'bold 64px Arial';
-    sCtx.textAlign = 'center'; sCtx.textBaseline = 'middle';
+    sCtx.fillStyle = '#fff';
+    sCtx.font = 'bold 60px Arial';
     sCtx.fillText(question, 256, 64);
   }
 
   const signTex = new THREE.CanvasTexture(signCanvas);
-  const signSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: signTex }));
-  signSprite.position.set(0, 4.2, 0);
-  signSprite.scale.set(6, 1.5, 1);
-  group.add(signSprite);
+  // Fixed plane (not sprite) — stays aligned with the gate
+  const signGeo = new THREE.PlaneGeometry(6, 1.5);
+  const signMesh = new THREE.Mesh(signGeo, new THREE.MeshBasicMaterial({ map: signTex, transparent: true }));
+  signMesh.position.set(0, 4.2, 0.1);
+  group.add(signMesh);
+  // Same sign on the back side (visible from both directions)
+  const signBack = signMesh.clone();
+  signBack.rotation.y = Math.PI;
+  signBack.position.set(0, 4.2, -0.1);
+  group.add(signBack);
 
   // Warm glow on the ground — visible beacon
   const glow = new THREE.PointLight(0xffdd44, 1.0, 15);
@@ -1607,33 +1628,63 @@ function createChallenge() {
     }
     hayGroup.add(carrotsGroup);
 
-    // Answer display — always big clean number
+    // Answer display — dots at level 1, numbers later
     const ansVal = answers[i];
+    const showDots = level <= 1 && ansVal <= 10;
     const ansCanvas = document.createElement('canvas');
     ansCanvas.width = 128;
     ansCanvas.height = 128;
     const aCtx = ansCanvas.getContext('2d');
-    // Soft white circle with shadow
-    aCtx.shadowColor = 'rgba(0,0,0,0.2)';
+    // Dark circle background (matches question board)
+    aCtx.shadowColor = 'rgba(0,0,0,0.3)';
     aCtx.shadowBlur = 8;
-    aCtx.fillStyle = '#FFFFFF';
+    aCtx.fillStyle = 'rgba(0, 0, 0, 0.85)';
     aCtx.beginPath();
     aCtx.arc(64, 64, 56, 0, Math.PI * 2);
     aCtx.fill();
     aCtx.shadowBlur = 0;
-    // Big bold number
-    aCtx.fillStyle = '#333';
-    aCtx.font = 'bold 64px Arial';
-    aCtx.textAlign = 'center';
-    aCtx.textBaseline = 'middle';
-    aCtx.fillText(String(ansVal), 64, 66);
+    aCtx.strokeStyle = 'rgba(255, 220, 50, 0.4)';
+    aCtx.lineWidth = 2;
+    aCtx.stroke();
 
+    if (showDots && ansVal > 0) {
+      const dColor = problemData.dotColor || '#ff5555';
+      const cols = ansVal <= 3 ? ansVal : Math.ceil(Math.sqrt(ansVal));
+      const rows = Math.ceil(ansVal / cols);
+      const dotR = ansVal <= 4 ? 14 : 10;
+      const spacing = dotR * 2.8;
+      const ox = 64 - (cols - 1) * spacing / 2;
+      const oy = 64 - (rows - 1) * spacing / 2;
+      aCtx.fillStyle = dColor;
+      for (let d = 0; d < ansVal; d++) {
+        const col = d % cols;
+        const row = Math.floor(d / cols);
+        aCtx.beginPath();
+        aCtx.arc(ox + col * spacing, oy + row * spacing, dotR, 0, Math.PI * 2);
+        aCtx.fill();
+      }
+    } else {
+      // Number (white on dark)
+      aCtx.fillStyle = '#fff';
+      aCtx.font = 'bold 64px Arial';
+      aCtx.textAlign = 'center';
+      aCtx.textBaseline = 'middle';
+      aCtx.fillText(String(ansVal), 64, 66);
+    }
+
+    // Labels front and back only
     const ansTex = new THREE.CanvasTexture(ansCanvas);
-    const ansSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: ansTex }));
-    ansSprite.position.set(0, 2.0, 0);
-    ansSprite.scale.set(1.6, 1.6, 1);
-    hayGroup.add(ansSprite);
+    const labelGeo = new THREE.PlaneGeometry(1.0, 1.0);
+    const labelMat = new THREE.MeshBasicMaterial({ map: ansTex, transparent: true });
+    const labelFront = new THREE.Mesh(labelGeo, labelMat);
+    labelFront.position.set(0, 0.55, 0.66);
+    bucketPivot.add(labelFront);
+    const labelBack = new THREE.Mesh(labelGeo, labelMat.clone());
+    labelBack.position.set(0, 0.55, -0.66);
+    labelBack.rotation.y = Math.PI;
+    bucketPivot.add(labelBack);
 
+    hayGroup.scale.set(1.6, 1.6, 1.6); // bigger buckets
     group.add(hayGroup);
     hayPiles.push({
       localX: hx, answer: ansVal, correct: ansVal === answer,
@@ -1656,20 +1707,25 @@ function createChallenge() {
 const DOT_COLORS = ['#ff5555', '#5599ff', '#ffaa22', '#55cc55', '#cc55ff', '#ff55aa'];
 
 function generateProblem() {
-  const type = Math.random() < 0.5 ? 'add' : 'sub';
-  // Visual (dots) at low levels, mix in numbers later
-  const useVisual = maxNumber <= 7 || Math.random() < 0.5;
+  // Level 1 (maxNumber=5): only addition
+  // Level 2+ (maxNumber>=7): mix addition and subtraction
+  const canSubtract = maxNumber >= 7;
+  const type = (canSubtract && Math.random() < 0.4) ? 'sub' : 'add';
+
+  // Visual dots at low levels, mix in numbers later
+  const useVisual = maxNumber <= 9 || Math.random() < 0.4;
   const dotColor = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
   let a, b, answer;
 
   if (type === 'add') {
-    // Result must not exceed maxNumber
     a = 1 + Math.floor(Math.random() * (maxNumber - 1));
-    b = 1 + Math.floor(Math.random() * (maxNumber - a));
+    b = 1 + Math.floor(Math.random() * Math.max(1, maxNumber - a));
     answer = a + b;
   } else {
-    a = 2 + Math.floor(Math.random() * (maxNumber - 1));
-    b = 1 + Math.floor(Math.random() * (a - 1));
+    // Cap subtraction: level 2-3 max 4, then maxNumber
+    const subMax = level <= 3 ? Math.min(maxNumber, 4) : maxNumber;
+    a = 2 + Math.floor(Math.random() * (subMax - 1));
+    b = 1 + Math.floor(Math.random() * Math.max(1, a - 1));
     answer = a - b;
   }
   const question = `${a} ${type === 'add' ? '+' : '−'} ${b} = ?`;
@@ -2435,21 +2491,41 @@ function handleAnswer(challenge, pile) {
   questionBar.style.display = 'none';
 }
 
+// Level structure:
+// Lvl 1: addition 1-5 (dots only)
+// Lvl 2: addition 1-7 (dots + some numbers)
+// Lvl 3: addition + subtraction 1-7
+// Lvl 4: addition + subtraction 1-9
+// Lvl 5: addition + subtraction 1-10 (numbers)
+// Lvl 6: 1-12
+// Lvl 7: 1-15
+const LEVELS = [
+  { maxNum: 5, name: 'Poziom 1' },
+  { maxNum: 7, name: 'Poziom 2' },
+  { maxNum: 7, name: 'Poziom 3' },   // same range but subtraction unlocks at 7
+  { maxNum: 9, name: 'Poziom 4' },
+  { maxNum: 10, name: 'Poziom 5' },
+  { maxNum: 12, name: 'Poziom 6' },
+  { maxNum: 15, name: 'Poziom 7' },
+];
+
 function updateDifficulty() {
-  // Kindergarten pace: slow progression, low ceiling
-  // Start: 1-5, max: 15, need 8 correct at 80%+ to advance
   const rate = totalAnswers > 0 ? correctAnswers / totalAnswers : 0;
 
-  if (correctAnswers >= 8 && rate > 0.8 && maxNumber < 15) {
-    maxNumber += 2; // small step: 5 → 7 → 9 → 11 → 13 → 15
-    level = Math.floor((maxNumber - 3) / 2);
-    document.getElementById('level-display').textContent = `Poziom ${level}`;
+  // Fast advancement early, slower later
+  const needed = level <= 3 ? 2 : 3;
+  if (correctAnswers >= needed && rate >= 0.65 && level < LEVELS.length) {
+    level = Math.min(level + 1, LEVELS.length);
+    maxNumber = LEVELS[Math.min(level - 1, LEVELS.length - 1)].maxNum;
+    const lvlName = LEVELS[Math.min(level - 1, LEVELS.length - 1)].name;
+    document.getElementById('level-display').textContent = lvlName;
     correctAnswers = 0;
     totalAnswers = 0;
-  } else if (totalAnswers >= 6 && rate < 0.4 && maxNumber > 5) {
-    maxNumber = Math.max(maxNumber - 2, 5);
-    level = Math.max(1, Math.floor((maxNumber - 3) / 2));
-    document.getElementById('level-display').textContent = `Poziom ${level}`;
+    // TODO: celebration for level up
+  } else if (totalAnswers >= 5 && rate < 0.35 && level > 1) {
+    level = Math.max(1, level - 1);
+    maxNumber = LEVELS[level - 1].maxNum;
+    document.getElementById('level-display').textContent = LEVELS[level - 1].name;
     correctAnswers = 0;
     totalAnswers = 0;
   }
