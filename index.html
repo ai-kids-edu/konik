@@ -1621,16 +1621,11 @@ function createChallenge() {
     const bucketMat = new THREE.MeshLambertMaterial({ color: bucketColor });
 
     // Bucket body
-    const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.5, 1.0, 12, 1, true), bucketMat);
+    // Closed bucket (not open-ended)
+    const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.5, 1.0, 12), bucketMat);
     bucket.position.y = 0.5;
     bucket.castShadow = true;
     bucketPivot.add(bucket);
-
-    // Bottom + rim
-    const bottom = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12), new THREE.MeshLambertMaterial({ color: 0x556677 }));
-    bottom.rotation.x = -Math.PI / 2;
-    bottom.position.y = 0.01;
-    bucketPivot.add(bottom);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.04, 6, 16), new THREE.MeshLambertMaterial({ color: 0xaaaaaa }));
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 1.0;
@@ -1653,10 +1648,21 @@ function createChallenge() {
     const carrotsGroup = new THREE.Group();
     carrotsGroup.visible = false;
     for (let c = 0; c < 6; c++) {
-      const carrot = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.45, 5), new THREE.MeshLambertMaterial({ color: 0xff8c00 }));
-      carrot.position.set(-0.9 - Math.random() * 0.6, 0.15 + Math.random() * 0.1, (Math.random() - 0.5) * 0.8);
-      carrot.rotation.set(Math.PI / 2 + (Math.random() - 0.5) * 0.8, 0, Math.random() * Math.PI);
+      const carrot = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.5, 6), new THREE.MeshStandardMaterial({ color: 0xff8c00, roughness: 0.6 }));
+      // Scatter toward player (+Z direction)
+      carrot.position.set(
+        (Math.random() - 0.5) * 0.8,
+        0.12 + Math.random() * 0.08,
+        0.8 + Math.random() * 0.8
+      );
+      carrot.rotation.set(Math.PI / 2 + (Math.random() - 0.5) * 0.6, Math.random() * Math.PI, 0);
       carrotsGroup.add(carrot);
+      // Green top
+      const top = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.15, 4), new THREE.MeshStandardMaterial({ color: 0x33aa33 }));
+      top.position.copy(carrot.position);
+      top.position.z += 0.18;
+      top.rotation.copy(carrot.rotation);
+      carrotsGroup.add(top);
     }
     hayGroup.add(carrotsGroup);
 
@@ -2403,25 +2409,23 @@ function animateBucketTip(pile, isCorrect) {
   function animate() {
     const elapsed = (Date.now() - startTime) / 1000;
 
-    // Phase 1 (0-0.3s): Lid pops off and flies up
+    // Phase 1 (0-0.3s): Lid pops off toward player
     const lidT = Math.min(elapsed / 0.3, 1);
     lid.position.y = 1.0 + lidT * 2.0;
-    lid.position.x = lidT * 0.8;
-    lid.rotation.z = lidT * 1.2;
-    lid.rotation.x = lidT * 0.5;
+    lid.position.z = lidT * 0.6;
+    lid.rotation.x = lidT * 1.0;
+    lid.rotation.z = lidT * 0.4;
 
-    // Phase 2 (0.15-0.6s): Bucket tips over sideways
+    // Phase 2 (0.15-0.6s): Bucket tips TOWARD player (+Z)
     if (elapsed > 0.15) {
       const tipT = Math.min((elapsed - 0.15) / 0.45, 1);
-      // Ease out
       const eased = 1 - Math.pow(1 - tipT, 2);
-      pivot.rotation.z = eased * (Math.PI / 2.5);
-      pivot.position.x = eased * 0.5;
-      // Lift bucket so it doesn't clip through ground
-      pivot.position.y = eased * 0.3;
+      pivot.rotation.x = eased * (Math.PI / 2.5);
+      pivot.position.z = eased * 0.4;
+      pivot.position.y = eased * 0.2;
     }
 
-    // Phase 3 (0.4s+): Show carrots spilling if correct
+    // Phase 3 (0.4s+): Show carrots spilling toward player
     if (isCorrect && elapsed > 0.4) {
       pile.carrotsGroup.visible = true;
     }
@@ -2485,7 +2489,14 @@ function handleAnswer(challenge, pile) {
     });
     updateDifficulty();
 
-    // Play eating animation from GLB model
+    // Turn horse toward the correct bucket, then eat
+    const bucketWorldX = challenge.position.x + pile.localX;
+    const bucketWorldZ = challenge.position.z;
+    const dx = bucketWorldX - horsePos.x;
+    const dz = bucketWorldZ - horsePos.z;
+    horseAngle = Math.atan2(dx, dz);
+    horseGroup.rotation.y = horseAngle;
+
     isEatingCarrots = true;
     playHorseAnimation('eating', 2500);
 
