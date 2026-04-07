@@ -2619,27 +2619,34 @@ function handleAnswer(challenge, pile) {
     isEatingCarrots = true;
     playHorseAnimation('eating', 2500);
 
-    // Also hide carrots from bucket one by one
+    // Carrots disappear one by one with shrink animation during eating
     const carrotMeshes = pile.carrotsGroup.visible ? pile.carrotsGroup.children.slice() : [];
-    let eatIdx = 0;
-    const eatInterval = setInterval(() => {
-      if (eatIdx < carrotMeshes.length) {
-        carrotMeshes[eatIdx].visible = false;
-        eatIdx++;
-      } else {
-        clearInterval(eatInterval);
-      }
-    }, 300);
+    const eatDelay = 2000 / (carrotMeshes.length + 1); // spread across eating duration
+    carrotMeshes.forEach((carrot, idx) => {
+      setTimeout(() => {
+        // Shrink and vanish
+        const shrinkStart = Date.now();
+        function shrinkCarrot() {
+          const t = (Date.now() - shrinkStart) / 300;
+          if (t >= 1) { carrot.visible = false; return; }
+          const s = 1 - t;
+          carrot.scale.set(s, s, s);
+          carrot.position.y += 0.01; // float up slightly
+          requestAnimationFrame(shrinkCarrot);
+        }
+        shrinkCarrot();
+      }, (idx + 1) * eatDelay);
+    });
 
     setTimeout(() => {
       isEatingCarrots = false;
     }, 2500);
 
-    // Fade out challenge gate after eating
+    // Fade out challenge gate after 10s
     setTimeout(() => {
       const fadeStart = Date.now();
       function fadeGate() {
-        const t = (Date.now() - fadeStart) / 2000; // 2s fade
+        const t = (Date.now() - fadeStart) / 2000;
         if (t >= 1) {
           scene.remove(challenge.group);
           const idx = challenges.indexOf(challenge);
@@ -2647,7 +2654,7 @@ function handleAnswer(challenge, pile) {
           return;
         }
         challenge.group.traverse((child) => {
-          if (child.isMesh && child.material) {
+          if (child.isMesh && child.material && child.visible) {
             child.material.transparent = true;
             child.material.opacity = 1 - t;
           }
@@ -2655,7 +2662,7 @@ function handleAnswer(challenge, pile) {
         requestAnimationFrame(fadeGate);
       }
       fadeGate();
-    }, 4000); // start fading 4s after answer
+    }, 10000);
   } else {
     // Wrong — clear push back away from bucket
     totalAnswers++;

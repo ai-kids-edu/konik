@@ -1,7 +1,19 @@
 # Konik Matematyczny — Development Guide
 
-## What This Is
-Educational math game for kindergarteners (5-6 year olds). A horse gallops through a 3D world, finds challenge gates, and solves math problems by riding into buckets with the correct answer. Players also collect apples from trees.
+## Mission & Audience
+**For:** Kindergarteners (5-6 year olds, "zerówka" in Polish school system). These kids are just learning to count, add, and subtract. They CANNOT read — everything must be visual/iconic.
+
+**Goal:** Make math feel like play, not school. The child rides a horse through a beautiful world, and math is woven into exploration — not an abstract quiz. The game should make kids say "wow!" and want to keep playing.
+
+**Context:** Built to demo at a kindergarten visit. Must work on tablets (mobile joystick) and laptops. Parents share the URL — it must look polished and load fast.
+
+**Design Principles:**
+- Visual over textual — dots/icons before numbers, no text labels kids can't read
+- Concrete before abstract — count real objects, not symbols
+- Celebration on success — confetti, eating animation, cutscene camera
+- No punishment on failure — bucket just tips over empty, gentle pushback
+- Progression must feel earned but not frustrating — fast early levels, slower later
+- The world itself should be worth exploring even without challenges
 
 **Live:** https://ai-kids-edu.github.io/konik/
 **Repo:** github.com/ai-kids-edu/konik
