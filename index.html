@@ -1691,7 +1691,7 @@ function createChallenge() {
 
     // Answer display — dots at level 1, numbers later
     const ansVal = answers[i];
-    const showDots = level <= 1 && ansVal <= 10;
+    const showDots = level <= 3 && ansVal <= 10;
     const ansCanvas = document.createElement('canvas');
     ansCanvas.width = 128;
     ansCanvas.height = 128;
@@ -1798,8 +1798,8 @@ function generateProblem() {
   const type = (canSubtract && Math.random() < 0.4) ? 'sub' : 'add';
 
   // Visual dots at low levels, mix in numbers later
-  // Dots for level 1-2, then mix, then mostly numbers
-  const useVisual = maxNumber <= 7 || (maxNumber <= 9 && Math.random() < 0.4);
+  // Dots for levels 1-3, numbers from level 4+
+  const useVisual = level <= 3;
   const dotColor = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
   let a, b, answer;
 
@@ -2277,18 +2277,29 @@ function update() {
   animateHorse(dt, input.moving);
 
   // Camera follow
-  // Camera higher and further back — see more of the world ahead
-  const camTarget = new THREE.Vector3(
-    horsePos.x - Math.sin(horseAngle) * 6,
-    horsePos.y + 4.5,
-    horsePos.z - Math.cos(horseAngle) * 6
-  );
+  // Camera — during eating, swing to the side so carrots are visible
+  let camTarget;
+  if (isEatingCarrots) {
+    // Cinematic close-up from the side — like a cutscene
+    const perpX = Math.cos(horseAngle);
+    const perpZ = -Math.sin(horseAngle);
+    camTarget = new THREE.Vector3(
+      horsePos.x + perpX * 3 + Math.sin(horseAngle) * 0.5,
+      horsePos.y + 1.5,
+      horsePos.z + perpZ * 3 + Math.cos(horseAngle) * 0.5
+    );
+  } else {
+    camTarget = new THREE.Vector3(
+      horsePos.x - Math.sin(horseAngle) * 6,
+      horsePos.y + 4.5,
+      horsePos.z - Math.cos(horseAngle) * 6
+    );
+  }
   camera.position.lerp(camTarget, dt * 3);
-  // Look slightly ahead of horse, not at its feet
   camera.lookAt(
-    horsePos.x + Math.sin(horseAngle) * 2,
-    horsePos.y + 1.0,
-    horsePos.z + Math.cos(horseAngle) * 2
+    horsePos.x + Math.sin(horseAngle) * (isEatingCarrots ? 1 : 2),
+    horsePos.y + (isEatingCarrots ? 0.5 : 1.0),
+    horsePos.z + Math.cos(horseAngle) * (isEatingCarrots ? 1 : 2)
   );
 
   // Challenge management
