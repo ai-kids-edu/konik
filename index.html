@@ -144,6 +144,22 @@ canvas { display: block; }
 <script type="module">
 import * as THREE from 'three';
 
+// ========== LOW-POLY STYLE ==========
+// Apply flat shading to all scene materials after scene is built
+function applyFlatShading() {
+  scene.traverse((obj) => {
+    if (obj.isMesh && obj.material) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (mat.flatShading !== undefined) {
+          mat.flatShading = true;
+          mat.needsUpdate = true;
+        }
+      }
+    }
+  });
+}
+
 // ========== GLOBALS ==========
 let scene, camera, renderer;
 let horse, horseGroup;
@@ -305,8 +321,21 @@ function getWaterDepth(x, z) {
 // ========== SCENE SETUP ==========
 function initScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 80, 250);
+  // Sky gradient (top: deep blue, bottom: warm horizon)
+  const skyCanvas = document.createElement('canvas');
+  skyCanvas.width = 1; skyCanvas.height = 256;
+  const skyCtx = skyCanvas.getContext('2d');
+  const grad = skyCtx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#4a90c8');   // deep sky blue at top
+  grad.addColorStop(0.5, '#88ccee'); // mid sky
+  grad.addColorStop(0.85, '#cce8f0'); // pale horizon
+  grad.addColorStop(1, '#eee8dd');   // warm haze at horizon
+  skyCtx.fillStyle = grad;
+  skyCtx.fillRect(0, 0, 1, 256);
+  const skyTexture = new THREE.CanvasTexture(skyCanvas);
+  skyTexture.magFilter = THREE.LinearFilter;
+  scene.background = skyTexture;
+  scene.fog = new THREE.Fog(0xdde8ee, 80, 280);
 
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
   camera.position.set(0, 8, 12);
@@ -316,18 +345,23 @@ function initScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Low-poly stylization: warm cinematic tone mapping
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.body.appendChild(renderer.domElement);
 
-  // Lights — warmer, more natural
-  const ambient = new THREE.AmbientLight(0xfff5e6, 0.45);
+  // Lights — tuned for flat-shaded low-poly look
+  const ambient = new THREE.AmbientLight(0xffeedd, 0.5);
   scene.add(ambient);
 
-  // Hemisphere light for natural sky/ground color bleed
-  const hemi = new THREE.HemisphereLight(0x87ceeb, 0x4a8c3f, 0.3);
+  // Hemisphere: sky blue from above, warm green from ground
+  const hemi = new THREE.HemisphereLight(0x88bbee, 0x557733, 0.35);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff0dd, 1.1);
-  sun.position.set(25, 35, 15);
+  // Strong sun for crisp facet shadows
+  const sun = new THREE.DirectionalLight(0xfff5e0, 1.3);
+  sun.position.set(30, 40, 20);
   sun.castShadow = true;
   sun.shadow.mapSize.width = 2048;
   sun.shadow.mapSize.height = 2048;
@@ -338,6 +372,9 @@ function initScene() {
   sun.shadow.camera.top = 40;
   sun.shadow.camera.bottom = -40;
   scene.add(sun);
+
+  // Clouds
+  createClouds();
 
   // Ground terrain with hills
   createTerrain();
@@ -501,7 +538,45 @@ function createTerrain() {
   scene.add(terrain);
 }
 
-// Distant land is now part of the extended terrain mesh — no separate function needed
+// ========== CLOUDS ==========
+let cloudGroups = [];
+function createClouds() {
+  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+  for (let i = 0; i < 15; i++) {
+    const cloudGroup = new THREE.Group();
+    // Each cloud = 3-5 overlapping low-poly spheres
+    const puffCount = 3 + Math.floor(Math.random() * 3);
+    for (let p = 0; p < puffCount; p++) {
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(2 + Math.random() * 3, 5, 4),
+        cloudMat
+      );
+      puff.position.set(
+        (p - puffCount / 2) * 2.5 + Math.random(),
+        Math.random() * 1.5,
+        Math.random() * 2 - 1
+      );
+      puff.scale.y = 0.4 + Math.random() * 0.2; // flatten
+      cloudGroup.add(puff);
+    }
+    cloudGroup.position.set(
+      (Math.random() - 0.5) * 400,
+      35 + Math.random() * 20,
+      (Math.random() - 0.5) * 400
+    );
+    cloudGroup.userData.speed = 0.5 + Math.random() * 1.5;
+    scene.add(cloudGroup);
+    cloudGroups.push(cloudGroup);
+  }
+}
+
+function animateClouds(dt) {
+  for (const cloud of cloudGroups) {
+    cloud.position.x += cloud.userData.speed * dt;
+    // Wrap around
+    if (cloud.position.x > 250) cloud.position.x = -250;
+  }
+}
 
 let waterMesh;
 function createWater() {
@@ -1371,132 +1446,160 @@ function animateFarmAnimals(dt) {
   }
 }
 
-// ========== LOW-POLY MESH HORSE ==========
+// ========== LOW-POLY STYLIZED HORSE ==========
 function createHorse() {
   horseGroup = new THREE.Group();
-  // Inner group rotated so model (built along +X) faces +Z (movement direction)
   const horseModel = new THREE.Group();
   horseModel.rotation.y = -Math.PI / 2;
   horseGroup.add(horseModel);
   legMeshes = [];
 
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xD2A679 });
-  const hoofMat = new THREE.MeshLambertMaterial({ color: 0x3D2817 });
-  const maneMat = new THREE.MeshLambertMaterial({ color: 0xE87BA8 });
-  const eyeMat  = new THREE.MeshLambertMaterial({ color: 0x111122 });
+  // Materials — warm palette with MeshStandardMaterial for nice light response
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd4a56a, roughness: 0.7 });
+  const bellyMat = new THREE.MeshStandardMaterial({ color: 0xe0be8a, roughness: 0.8 });
+  const hoofMat = new THREE.MeshStandardMaterial({ color: 0x2a1a0a, roughness: 0.9 });
+  const maneMat = new THREE.MeshStandardMaterial({ color: 0xf08caf, roughness: 0.6 });
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x0a0a15, roughness: 0.2 });
+  const noseMat = new THREE.MeshStandardMaterial({ color: 0xc09070, roughness: 0.8 });
 
-  // Body
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(2.8, 1.2, 1.1),
-    bodyMat
-  );
+  // Body — rounded with sphere scale for organic feel
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.7, 6, 5), bodyMat);
+  body.scale.set(2.0, 0.85, 0.8);
   body.position.set(0, 1.4, 0);
   body.castShadow = true;
   horseModel.add(body);
   horse = body;
 
-  // Neck (tilted cylinder)
-  const neck = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.3, 0.4, 1.2, 8),
-    bodyMat
-  );
-  neck.position.set(1.4, 2.0, 0);
-  neck.rotation.z = -0.5; // tilt forward
+  // Belly (lighter underside)
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.5, 5, 4), bellyMat);
+  belly.scale.set(1.8, 0.5, 0.7);
+  belly.position.set(0, 1.15, 0);
+  horseModel.add(belly);
+
+  // Chest (front bulk)
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.45, 5, 4), bodyMat);
+  chest.scale.set(0.8, 1.0, 0.9);
+  chest.position.set(1.0, 1.5, 0);
+  chest.castShadow = true;
+  horseModel.add(chest);
+
+  // Rump (back bulk)
+  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.5, 5, 4), bodyMat);
+  rump.scale.set(0.8, 0.9, 0.85);
+  rump.position.set(-1.0, 1.45, 0);
+  rump.castShadow = true;
+  horseModel.add(rump);
+
+  // Neck — tapered cylinder, angled forward
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.35, 1.3, 6), bodyMat);
+  neck.position.set(1.5, 2.05, 0);
+  neck.rotation.z = -0.45;
   neck.castShadow = true;
   horseModel.add(neck);
 
-  // Head
-  const head = new THREE.Mesh(
-    new THREE.BoxGeometry(1.0, 0.65, 0.55),
-    bodyMat
-  );
-  head.position.set(2.1, 2.3, 0);
+  // Head — elongated box with character
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.6, 0.5), bodyMat);
+  head.position.set(2.2, 2.4, 0);
   head.castShadow = true;
   horseModel.add(head);
 
-  // Snout / muzzle (smaller box at front of head)
-  const snout = new THREE.Mesh(
-    new THREE.BoxGeometry(0.45, 0.4, 0.45),
-    bodyMat
-  );
-  snout.position.set(2.7, 2.15, 0);
-  snout.castShadow = true;
+  // Muzzle — softer snout
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.22, 5, 4), noseMat);
+  snout.scale.set(1.0, 0.8, 0.9);
+  snout.position.set(2.8, 2.25, 0);
   horseModel.add(snout);
 
-  // Eyes
+  // Nostrils
   for (let side = -1; side <= 1; side += 2) {
-    const eye = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 8, 8),
-      eyeMat
-    );
-    eye.position.set(2.45, 2.4, side * 0.28);
-    horseModel.add(eye);
+    const nostril = new THREE.Mesh(new THREE.SphereGeometry(0.04, 4, 3), pupilMat);
+    nostril.position.set(2.95, 2.22, side * 0.08);
+    horseModel.add(nostril);
   }
 
-  // Ears
+  // Eyes — white + pupil + highlight
   for (let side = -1; side <= 1; side += 2) {
-    const ear = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.3, 0.12),
-      bodyMat
-    );
-    ear.position.set(2.0, 2.8, side * 0.2);
+    const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), eyeWhiteMat);
+    eyeWhite.position.set(2.5, 2.5, side * 0.26);
+    horseModel.add(eyeWhite);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.055, 5, 4), pupilMat);
+    pupil.position.set(2.55, 2.51, side * 0.28);
+    horseModel.add(pupil);
+    // Specular highlight
+    const highlight = new THREE.Mesh(new THREE.SphereGeometry(0.02, 4, 3), eyeWhiteMat);
+    highlight.position.set(2.57, 2.54, side * 0.27);
+    horseModel.add(highlight);
+  }
+
+  // Ears — pointed cones
+  for (let side = -1; side <= 1; side += 2) {
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 4), bodyMat);
+    ear.position.set(2.05, 2.85, side * 0.18);
+    ear.rotation.z = side * 0.15;
+    ear.rotation.x = side * 0.1;
     ear.castShadow = true;
     horseModel.add(ear);
   }
 
-  // Mane (thin boxes along neck and top of back)
-  for (let i = 0; i < 6; i++) {
-    const t = i / 5;
-    const mane = new THREE.Mesh(
-      new THREE.BoxGeometry(0.15, 0.35 + Math.random() * 0.15, 0.1),
-      maneMat
-    );
-    const mx = 0.6 + t * 1.5;
-    const my = 1.95 + t * 0.45;
-    mane.position.set(mx, my, 0);
-    mane.castShadow = true;
+  // Mane — flowing chevrons along neck, pink
+  for (let i = 0; i < 8; i++) {
+    const t = i / 7;
+    const mane = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3 + t * 0.15, 0.08), maneMat);
+    const mx = 0.5 + t * 1.6;
+    const my = 1.95 + t * 0.42;
+    mane.position.set(mx, my + 0.15, 0.02);
+    mane.rotation.z = -0.2;
     horseModel.add(mane);
   }
+  // Extra mane tuft between ears
+  const forelock = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.25, 0.15), maneMat);
+  forelock.position.set(2.05, 2.7, 0);
+  horseModel.add(forelock);
 
-  // Tail (hangs down from rump)
-  const tail = new THREE.Mesh(
-    new THREE.BoxGeometry(0.1, 1.0, 0.15),
-    maneMat
-  );
-  tail.position.set(-1.5, 0.8, 0);
-  tail.rotation.z = -0.3; // hangs down with slight backward angle
-  tail.castShadow = true;
-  horseModel.add(tail);
+  // Tail — flowing, hangs naturally
+  const tailGroup = new THREE.Group();
+  tailGroup.position.set(-1.45, 1.3, 0);
+  for (let ti = 0; ti < 4; ti++) {
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.12 - ti * 0.02), maneMat);
+    seg.position.set(0, -ti * 0.25, 0);
+    seg.rotation.z = -0.15 - ti * 0.05;
+    tailGroup.add(seg);
+  }
+  horseModel.add(tailGroup);
 
-  // Legs (4 cylinders with hoof caps)
+  // Legs — tapered with knee joint and hooves
   const legDefs = [
-    { x:  0.9, z:  0.35, phase: 0 },
-    { x:  0.9, z: -0.35, phase: Math.PI },
-    { x: -0.9, z:  0.35, phase: Math.PI },
-    { x: -0.9, z: -0.35, phase: 0 },
+    { x:  0.8, z:  0.32, phase: 0 },
+    { x:  0.8, z: -0.32, phase: Math.PI },
+    { x: -0.8, z:  0.32, phase: Math.PI },
+    { x: -0.8, z: -0.32, phase: 0 },
   ];
 
   legDefs.forEach((def) => {
-    // Pivot group so the leg rotates from the hip (top of the leg)
     const legPivot = new THREE.Group();
-    legPivot.position.set(def.x, 0.85, def.z);
+    legPivot.position.set(def.x, 0.9, def.z);
     legPivot.userData.phase = def.phase;
 
-    // Upper leg cylinder (centered so top is at pivot)
-    const leg = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.1, 0.1, 0.85, 6),
-      bodyMat
-    );
-    leg.position.y = -0.425; // half-height down from pivot
-    leg.castShadow = true;
-    legPivot.add(leg);
+    // Upper leg
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.5, 5), bodyMat);
+    upper.position.y = -0.25;
+    upper.castShadow = true;
+    legPivot.add(upper);
+
+    // Knee joint
+    const knee = new THREE.Mesh(new THREE.SphereGeometry(0.07, 4, 3), bodyMat);
+    knee.position.y = -0.5;
+    legPivot.add(knee);
+
+    // Lower leg
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.4, 5), bodyMat);
+    lower.position.y = -0.7;
+    lower.castShadow = true;
+    legPivot.add(lower);
 
     // Hoof
-    const hoof = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.13, 0.15, 6),
-      hoofMat
-    );
-    hoof.position.y = -0.85;
+    const hoof = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.1, 5), hoofMat);
+    hoof.position.y = -0.9;
     hoof.castShadow = true;
     legPivot.add(hoof);
 
@@ -2200,8 +2303,9 @@ function update() {
     }
   }
 
-  // Animate water
+  // Animate water and clouds
   animateWater(clock.elapsedTime);
+  animateClouds(dt);
 
   // Remove far-away challenges (2D distance)
   for (let i = challenges.length - 1; i >= 0; i--) {
@@ -2635,6 +2739,9 @@ window.startGame = function () {
   createHorse();
   initInput();
   initMinimap();
+
+  // Apply low-poly flat shading to everything
+  applyFlatShading();
 
   // Restore state if hot-reloading
   const saved = loadState();
