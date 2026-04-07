@@ -1672,26 +1672,20 @@ function createChallenge() {
     // Carrots spilling (hidden until correct reveal)
     const carrotsGroup = new THREE.Group();
     carrotsGroup.visible = false;
-    // Carrots scattered in front of bucket (toward +Z where horse approaches)
+    // Carrots scattered in front of bucket — use GLB model
     for (let c = 0; c < 6; c++) {
-      const carrot = new THREE.Mesh(
-        new THREE.ConeGeometry(0.12, 0.7, 6),
-        new THREE.MeshStandardMaterial({ color: 0xff9922, roughness: 0.4, emissive: 0x331100, emissiveIntensity: 0.1 })
-      );
-      const top = new THREE.Mesh(
-        new THREE.ConeGeometry(0.08, 0.25, 4),
-        new THREE.MeshStandardMaterial({ color: 0x22bb22 })
-      );
-      top.position.y = 0.4;
-      carrot.add(top);
-      // Spread in front of bucket
-      const spreadX = (Math.random() - 0.5) * 1.2;
-      const spreadZ = 0.8 + Math.random() * 1.2;
-      carrot.position.set(spreadX, 0.15, spreadZ);
-      // Tilted ~45deg — sticking up from ground, visible!
-      carrot.rotation.x = Math.PI / 4 + (Math.random() - 0.5) * 0.4;
-      carrot.rotation.y = Math.random() * Math.PI * 2;
-      carrotsGroup.add(carrot);
+      // Carrot model height=0.5 at scale 1. We want ~0.4m → scale 0.8
+      const carrotModel = cloneModel('carrot', 0.8);
+      if (carrotModel) {
+        brightenModel(carrotModel, 2.0);
+        const spreadX = (Math.random() - 0.5) * 1.2;
+        const spreadZ = 0.8 + Math.random() * 1.2;
+        carrotModel.position.set(spreadX, 0.1, spreadZ);
+        // Tilted, sticking out of ground
+        carrotModel.rotation.x = Math.PI / 5 + (Math.random() - 0.5) * 0.3;
+        carrotModel.rotation.y = Math.random() * Math.PI * 2;
+        carrotsGroup.add(carrotModel);
+      }
     }
     hayGroup.add(carrotsGroup);
 
@@ -1804,7 +1798,8 @@ function generateProblem() {
   const type = (canSubtract && Math.random() < 0.4) ? 'sub' : 'add';
 
   // Visual dots at low levels, mix in numbers later
-  const useVisual = maxNumber <= 9 || Math.random() < 0.4;
+  // Dots for level 1-2, then mix, then mostly numbers
+  const useVisual = maxNumber <= 7 || (maxNumber <= 9 && Math.random() < 0.4);
   const dotColor = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
   let a, b, answer;
 
