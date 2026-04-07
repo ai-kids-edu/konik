@@ -29,12 +29,24 @@ canvas { display: block; }
 #level-display { color: #88ff88; font-size: 14px; }
 
 #question-bar {
-  position: fixed; top: 50px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,0.7); color: #fff; padding: 12px 28px;
-  border-radius: 16px; font-size: 26px; font-weight: bold;
+  position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.75); color: #fff; padding: 10px 30px;
+  border-radius: 18px; font-size: 36px; font-weight: bold;
   backdrop-filter: blur(6px); z-index: 10; display: none;
-  border: 2px solid rgba(255,200,50,0.5);
-  text-align: center; min-width: 200px;
+  border: 2px solid rgba(255,220,50,0.5);
+  text-align: center;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.3);
+  white-space: nowrap;
+}
+#question-bar .dots {
+  display: inline-flex; gap: 6px; align-items: center; vertical-align: middle;
+}
+#question-bar .dot {
+  width: 28px; height: 28px; border-radius: 50%; display: inline-block;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+#question-bar .op {
+  font-size: 36px; margin: 0 10px; font-weight: bold;
 }
 
 #feedback {
@@ -342,7 +354,7 @@ function beachStartZ(x) {
 function waterStartZ(x) {
   return beachStartZ(x) + 18;
 }
-const WATER_DEEP_Z = 140; // allow wading deeper into the ocean
+const WATER_DEEP_Z = 200; // can swim far out into the ocean
 
 // Farm location
 const FARM_X = -45;
@@ -1451,7 +1463,8 @@ function createChallenge() {
   if (cz > waterStartZ(cx) - 5) cz = waterStartZ(cx) - 5;
 
   // Generate math problem
-  const { question, answer, icon, useVisual } = generateProblem();
+  const problemData = generateProblem();
+  const { question, answer } = problemData;
   const wrongAnswers = generateWrongAnswers(answer);
   const answers = [answer, ...wrongAnswers].sort(() => Math.random() - 0.5);
 
@@ -1459,101 +1472,94 @@ function createChallenge() {
   const challengeY = getTerrainHeight(cx, cz);
   group.position.set(cx, challengeY, cz);
 
-  // === GATE: two wooden posts with flowers + vine arch ===
+  // === GATE: two simple wooden posts ===
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8B6530, roughness: 0.9 });
-  const flowerColors = [0xff6688, 0xffaa44, 0xff44aa, 0x44aaff, 0xaaff44];
-
   for (const side of [-1, 1]) {
-    // Wooden post (thicker, natural)
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 4, 6), woodMat);
-    post.position.set(side * 5.5, 2, 0);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 4.5, 6), woodMat);
+    post.position.set(side * 5.5, 2.25, 0);
     post.castShadow = true;
     group.add(post);
-    // Flowers climbing the post
-    for (let fi = 0; fi < 4; fi++) {
-      const flower = new THREE.Mesh(
-        new THREE.SphereGeometry(0.15, 6, 4),
-        new THREE.MeshStandardMaterial({ color: flowerColors[Math.floor(Math.random() * flowerColors.length)] })
-      );
-      flower.position.set(side * 5.5 + (Math.random() - 0.5) * 0.3, 1 + fi * 0.8, (Math.random() - 0.5) * 0.3);
-      group.add(flower);
-      // Leaf
-      const leaf = new THREE.Mesh(
-        new THREE.SphereGeometry(0.1, 4, 3),
-        new THREE.MeshStandardMaterial({ color: 0x44aa33 })
-      );
-      leaf.scale.set(1.5, 0.5, 1);
-      leaf.position.set(flower.position.x + 0.15, flower.position.y - 0.1, flower.position.z);
-      group.add(leaf);
-    }
-  }
-  // Arch between posts (curved vine)
-  const archMat = new THREE.MeshStandardMaterial({ color: 0x44aa33 });
-  for (let ai = 0; ai <= 8; ai++) {
-    const t = ai / 8;
-    const ax = -5.5 + t * 11;
-    const ay = 4 + Math.sin(t * Math.PI) * 0.8; // curved arch
-    const vine = new THREE.Mesh(new THREE.SphereGeometry(0.1, 5, 4), archMat);
-    vine.position.set(ax, ay, 0);
-    vine.scale.set(1.5, 0.8, 1);
-    group.add(vine);
-    // Random flower on arch
-    if (Math.random() > 0.4) {
-      const archFlower = new THREE.Mesh(
-        new THREE.SphereGeometry(0.12, 6, 4),
-        new THREE.MeshStandardMaterial({ color: flowerColors[Math.floor(Math.random() * flowerColors.length)] })
-      );
-      archFlower.position.set(ax, ay + 0.15, (Math.random() - 0.5) * 0.2);
-      group.add(archFlower);
-    }
+    // Small cap on top
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), woodMat);
+    cap.position.set(side * 5.5, 4.6, 0);
+    group.add(cap);
   }
 
-  // === QUESTION BUBBLE floating above gate ===
-  const bubbleCanvas = document.createElement('canvas');
-  bubbleCanvas.width = 512;
-  bubbleCanvas.height = 128;
-  const bCtx = bubbleCanvas.getContext('2d');
-  // Rounded rectangle background
-  bCtx.fillStyle = 'rgba(255,255,255,0.92)';
-  const r = 20;
-  bCtx.beginPath();
-  bCtx.moveTo(r, 0);
-  bCtx.lineTo(512 - r, 0);
-  bCtx.quadraticCurveTo(512, 0, 512, r);
-  bCtx.lineTo(512, 128 - r);
-  bCtx.quadraticCurveTo(512, 128, 512 - r, 128);
-  bCtx.lineTo(r, 128);
-  bCtx.quadraticCurveTo(0, 128, 0, 128 - r);
-  bCtx.lineTo(0, r);
-  bCtx.quadraticCurveTo(0, 0, r, 0);
-  bCtx.fill();
-  // Border
-  bCtx.strokeStyle = '#88aa55';
-  bCtx.lineWidth = 4;
-  bCtx.stroke();
-  // Question text
-  bCtx.fillStyle = '#333';
-  const fontSize = useVisual ? Math.min(40, Math.floor(400 / question.length * 1.8)) : 48;
-  bCtx.font = `bold ${fontSize}px Arial`;
-  bCtx.textAlign = 'center';
-  bCtx.textBaseline = 'middle';
-  bCtx.fillText(question, 256, 64);
+  // Question sign board hanging between posts
+  const { a: numA, b: numB, type: opType, useVisual: isVisual, dotColor } = problemData;
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 512;
+  signCanvas.height = 128;
+  const sCtx = signCanvas.getContext('2d');
 
-  const bubbleTex = new THREE.CanvasTexture(bubbleCanvas);
-  const bubbleSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex }));
-  bubbleSprite.position.set(0, 5.8, 0);
-  bubbleSprite.scale.set(6, 1.5, 1);
-  group.add(bubbleSprite);
+  // Wooden board background
+  sCtx.fillStyle = '#f5e6c8';
+  sCtx.beginPath();
+  sCtx.roundRect(4, 4, 504, 120, 12);
+  sCtx.fill();
+  sCtx.strokeStyle = '#8B6530';
+  sCtx.lineWidth = 4;
+  sCtx.stroke();
 
-  // Light glow under the arch
-  const glow = new THREE.PointLight(0xffeedd, 0.5, 8);
-  glow.position.set(0, 2, 0);
+  if (isVisual) {
+    const dotR = Math.min(18, Math.floor(200 / (numA + numB)));
+    const gap = dotR * 2.6;
+    const opW = 36;
+    const totalW = numA * gap + opW + numB * gap + 70;
+    let x = (512 - totalW) / 2 + dotR;
+
+    sCtx.fillStyle = dotColor;
+    for (let d = 0; d < numA; d++) {
+      sCtx.beginPath();
+      sCtx.arc(x + d * gap, 64, dotR, 0, Math.PI * 2);
+      sCtx.fill();
+      sCtx.strokeStyle = '#333'; sCtx.lineWidth = 2; sCtx.stroke();
+    }
+    x += numA * gap;
+    sCtx.fillStyle = '#444';
+    sCtx.font = 'bold 48px Arial';
+    sCtx.textAlign = 'center'; sCtx.textBaseline = 'middle';
+    sCtx.fillText(opType === 'add' ? '+' : '−', x + opW/2, 64);
+    x += opW;
+    sCtx.fillStyle = dotColor;
+    for (let d = 0; d < numB; d++) {
+      sCtx.beginPath();
+      sCtx.arc(x + d * gap, 64, dotR, 0, Math.PI * 2);
+      sCtx.fill();
+      sCtx.strokeStyle = '#333'; sCtx.lineWidth = 2; sCtx.stroke();
+    }
+    x += numB * gap;
+    sCtx.fillStyle = '#444';
+    sCtx.fillText('= ?', x + 25, 64);
+  } else {
+    sCtx.fillStyle = '#333';
+    sCtx.font = 'bold 64px Arial';
+    sCtx.textAlign = 'center'; sCtx.textBaseline = 'middle';
+    sCtx.fillText(question, 256, 64);
+  }
+
+  const signTex = new THREE.CanvasTexture(signCanvas);
+  const signSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: signTex }));
+  signSprite.position.set(0, 4.2, 0);
+  signSprite.scale.set(6, 1.5, 1);
+  group.add(signSprite);
+
+  // Warm glow on the ground — visible beacon
+  const glow = new THREE.PointLight(0xffdd44, 1.0, 15);
+  glow.position.set(0, 3, 0);
   group.add(glow);
+  // Glowing sphere on top of each post
+  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xffee44, emissive: 0xffdd22, emissiveIntensity: 0.8 });
+  for (const side of [-1, 1]) {
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), beaconMat);
+    orb.position.set(side * 5.5, 4.9, 0);
+    group.add(orb);
+  }
 
   // === 3 BUCKETS with visual answer displays ===
   const hayPiles = [];
   for (let i = 0; i < 3; i++) {
-    const hx = (i - 1) * 5;
+    const hx = (i - 1) * 3.5;
     const hayGroup = new THREE.Group();
     hayGroup.position.set(hx, 0, 0);
 
@@ -1601,51 +1607,31 @@ function createChallenge() {
     }
     hayGroup.add(carrotsGroup);
 
-    // Answer display — visual dots/icons OR number
+    // Answer display — always big clean number
+    const ansVal = answers[i];
     const ansCanvas = document.createElement('canvas');
     ansCanvas.width = 128;
     ansCanvas.height = 128;
     const aCtx = ansCanvas.getContext('2d');
-    // White circle background
+    // Soft white circle with shadow
+    aCtx.shadowColor = 'rgba(0,0,0,0.2)';
+    aCtx.shadowBlur = 8;
     aCtx.fillStyle = '#FFFFFF';
     aCtx.beginPath();
-    aCtx.arc(64, 64, 58, 0, Math.PI * 2);
+    aCtx.arc(64, 64, 56, 0, Math.PI * 2);
     aCtx.fill();
-    aCtx.strokeStyle = '#88aa55';
-    aCtx.lineWidth = 3;
-    aCtx.stroke();
-
-    const ansVal = answers[i];
-    if (useVisual && ansVal <= 10) {
-      // Draw dots in a grid pattern
-      const dotIcon = icon || '●';
-      aCtx.font = ansVal <= 5 ? '28px Arial' : '20px Arial';
-      aCtx.textAlign = 'center';
-      aCtx.textBaseline = 'middle';
-      // Arrange in rows
-      const cols = ansVal <= 3 ? ansVal : Math.ceil(Math.sqrt(ansVal));
-      const rows = Math.ceil(ansVal / cols);
-      const spacing = ansVal <= 5 ? 30 : 22;
-      const startX = 64 - (cols - 1) * spacing / 2;
-      const startY = 64 - (rows - 1) * spacing / 2;
-      for (let d = 0; d < ansVal; d++) {
-        const col = d % cols;
-        const row = Math.floor(d / cols);
-        aCtx.fillText(dotIcon, startX + col * spacing, startY + row * spacing);
-      }
-    } else {
-      // Numeric display
-      aCtx.fillStyle = '#333';
-      aCtx.font = 'bold 56px Arial';
-      aCtx.textAlign = 'center';
-      aCtx.textBaseline = 'middle';
-      aCtx.fillText(String(ansVal), 64, 66);
-    }
+    aCtx.shadowBlur = 0;
+    // Big bold number
+    aCtx.fillStyle = '#333';
+    aCtx.font = 'bold 64px Arial';
+    aCtx.textAlign = 'center';
+    aCtx.textBaseline = 'middle';
+    aCtx.fillText(String(ansVal), 64, 66);
 
     const ansTex = new THREE.CanvasTexture(ansCanvas);
     const ansSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: ansTex }));
     ansSprite.position.set(0, 2.0, 0);
-    ansSprite.scale.set(1.4, 1.4, 1);
+    ansSprite.scale.set(1.6, 1.6, 1);
     hayGroup.add(ansSprite);
 
     group.add(hayGroup);
@@ -1660,51 +1646,42 @@ function createChallenge() {
   const challenge = {
     group, position: new THREE.Vector3(cx, challengeY, cz),
     question, answer, hayPiles, active: true, revealed: false,
+    problemData,
   };
   challenges.push(challenge);
   return challenge;
 }
 
-// Icons used for visual math problems
-const PROBLEM_ICONS = ['🍎', '🥕', '⭐', '🌸', '🐟', '🍀'];
+// Dot colors for visual counting problems
+const DOT_COLORS = ['#ff5555', '#5599ff', '#ffaa22', '#55cc55', '#cc55ff', '#ff55aa'];
 
 function generateProblem() {
   const type = Math.random() < 0.5 ? 'add' : 'sub';
-  const icon = PROBLEM_ICONS[Math.floor(Math.random() * PROBLEM_ICONS.length)];
-  // Mix: ~60% visual (icons), ~40% numeric (for progression)
-  const useVisual = maxNumber <= 7 || Math.random() < 0.6;
-  let a, b, answer, question, visualA, visualB;
+  // Visual (dots) at low levels, mix in numbers later
+  const useVisual = maxNumber <= 7 || Math.random() < 0.5;
+  const dotColor = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
+  let a, b, answer;
 
   if (type === 'add') {
-    a = 1 + Math.floor(Math.random() * Math.min(maxNumber, 8));
-    b = 1 + Math.floor(Math.random() * Math.min(maxNumber, 8));
+    // Result must not exceed maxNumber
+    a = 1 + Math.floor(Math.random() * (maxNumber - 1));
+    b = 1 + Math.floor(Math.random() * (maxNumber - a));
     answer = a + b;
-    if (useVisual) {
-      visualA = icon.repeat(a);
-      visualB = icon.repeat(b);
-      question = `${visualA} + ${visualB}`;
-    } else {
-      question = `${a} + ${b} = ?`;
-    }
   } else {
-    a = 2 + Math.floor(Math.random() * Math.min(maxNumber, 8));
+    a = 2 + Math.floor(Math.random() * (maxNumber - 1));
     b = 1 + Math.floor(Math.random() * (a - 1));
     answer = a - b;
-    if (useVisual) {
-      visualA = icon.repeat(a);
-      visualB = icon.repeat(b);
-      question = `${visualA} − ${visualB}`;
-    } else {
-      question = `${a} − ${b} = ?`;
-    }
   }
-  return { question, answer, icon, useVisual };
+  const question = `${a} ${type === 'add' ? '+' : '−'} ${b} = ?`;
+  return { question, answer, a, b, type, useVisual, dotColor };
 }
 
 function generateWrongAnswers(correct) {
   const candidates = [];
-  for (let i = Math.max(0, correct - 3); i <= correct + 3; i++) {
-    if (i !== correct) candidates.push(i);
+  // Allow 0 only at higher levels (maxNumber > 5), never negative
+  const minAnswer = maxNumber > 5 ? 0 : 1;
+  for (let i = Math.max(minAnswer, correct - 3); i <= correct + 3; i++) {
+    if (i !== correct && i >= minAnswer) candidates.push(i);
   }
   // Shuffle and pick 2
   for (let i = candidates.length - 1; i > 0; i--) {
@@ -1719,6 +1696,7 @@ function initInput() {
   window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
     if (e.code === 'Space') handleSpaceAction();
+    if (e.code === 'Escape') resetGame();
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
@@ -1982,7 +1960,7 @@ function animateHorse(dt, moving) {
   // Determine gait: idle → walk → gallop
   const speed = Math.abs(horseSpeed);
   let targetGait;
-  if (!moving || speed < 0.5) {
+  if (!moving || speed < 0.1) {
     targetGait = 'idle';
   } else if (speed > BASE_SPEED + 2) {
     targetGait = 'gallop';
@@ -2154,13 +2132,19 @@ function update() {
   animateHorse(dt, input.moving);
 
   // Camera follow
+  // Camera higher and further back — see more of the world ahead
   const camTarget = new THREE.Vector3(
-    horsePos.x - Math.sin(horseAngle) * 5,
-    horsePos.y + 3,
-    horsePos.z - Math.cos(horseAngle) * 5
+    horsePos.x - Math.sin(horseAngle) * 6,
+    horsePos.y + 4.5,
+    horsePos.z - Math.cos(horseAngle) * 6
   );
   camera.position.lerp(camTarget, dt * 3);
-  camera.lookAt(horsePos.x, horsePos.y + 1.0, horsePos.z);
+  // Look slightly ahead of horse, not at its feet
+  camera.lookAt(
+    horsePos.x + Math.sin(horseAngle) * 2,
+    horsePos.y + 1.0,
+    horsePos.z + Math.cos(horseAngle) * 2
+  );
 
   // Challenge management
   challengeCooldown -= dt;
@@ -2196,13 +2180,8 @@ function update() {
       }
     }
 
-    // Animate beacon
-    if (ch.group) {
-      const beacon = ch.group.children[3]; // beacon sphere
-      if (beacon) {
-        beacon.position.y = 5 + Math.sin(Date.now() * 0.003) * 0.3;
-      }
-    }
+    // Animate glow orbs (gentle bob)
+    // Orbs are the last children added to group
   }
 
   if (!nearChallenge) {
@@ -2410,7 +2389,12 @@ function handleAnswer(challenge, pile) {
     updateCarrotHUD();
 
     // Light confetti — gentle, colorful
-    spawnConfetti(challenge.position);
+    // Confetti from the correct bucket position
+    spawnConfetti({
+      x: challenge.position.x + pile.localX,
+      y: challenge.position.y + 1.5,
+      z: challenge.position.z,
+    });
     updateDifficulty();
 
     // Play eating animation from GLB model
@@ -2584,7 +2568,7 @@ function createChallengeAt(cx, cz, question, answerVal, answersData) {
   // Buckets (same code as createChallenge)
   const hayPiles = [];
   for (let i = 0; i < 3; i++) {
-    const hx = (i - 1) * 5;
+    const hx = (i - 1) * 3.5;
     const hayGroup = new THREE.Group();
     hayGroup.position.set(hx, 0, 0);
     const bucketPivot = new THREE.Group();
@@ -2641,6 +2625,32 @@ function createChallengeAt(cx, cz, question, answerVal, answersData) {
 }
 
 // ========== START ==========
+function showQuestion(challenge) {
+  const bar = document.getElementById('question-bar');
+  const pd = challenge.problemData;
+  if (!pd) { bar.textContent = challenge.question; bar.style.display = 'block'; return; }
+
+  if (pd.useVisual) {
+    let html = '<span class="dots">';
+    for (let i = 0; i < pd.a; i++) html += `<span class="dot" style="background:${pd.dotColor}"></span>`;
+    html += '</span>';
+    html += `<span class="op">${pd.type === 'add' ? '+' : '−'}</span>`;
+    html += '<span class="dots">';
+    for (let i = 0; i < pd.b; i++) html += `<span class="dot" style="background:${pd.dotColor}"></span>`;
+    html += '</span>';
+    html += '<span class="op">= ?</span>';
+    bar.innerHTML = html;
+  } else {
+    bar.textContent = challenge.question;
+  }
+  bar.style.display = 'block';
+}
+
+function resetGame() {
+  sessionStorage.removeItem('horseGameState');
+  location.reload();
+}
+
 window.startGame = async function () {
   const introEl = document.getElementById('intro');
   const btn = introEl.querySelector('button');
@@ -2692,20 +2702,14 @@ window.startGame = async function () {
     horseGroup.position.copy(horsePos);
 
     // Snap camera directly behind horse — no lerp animation
-    const camX = horsePos.x - Math.sin(horseAngle) * 5;
-    const camY = horsePos.y + 3;
-    const camZ = horsePos.z - Math.cos(horseAngle) * 5;
+    const camX = horsePos.x - Math.sin(horseAngle) * 6;
+    const camY = horsePos.y + 4.5;
+    const camZ = horsePos.z - Math.cos(horseAngle) * 6;
     camera.position.set(camX, camY, camZ);
-    camera.lookAt(horsePos.x, horsePos.y + 1.0, horsePos.z);
+    camera.lookAt(horsePos.x + Math.sin(horseAngle) * 2, horsePos.y + 1.0, horsePos.z + Math.cos(horseAngle) * 2);
 
-    // Restore challenges
-    if (saved.challenges && saved.challenges.length > 0) {
-      for (const sch of saved.challenges) {
-        createChallengeAt(sch.x, sch.z, sch.question, sch.answer, sch.answers);
-      }
-    } else {
-      for (let i = 0; i < 3; i++) createChallenge();
-    }
+    // Always generate fresh challenges (old format incompatible)
+    for (let i = 0; i < 3; i++) createChallenge();
   } else {
     // Spawn initial challenges
     for (let i = 0; i < 3; i++) createChallenge();
