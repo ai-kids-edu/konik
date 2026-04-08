@@ -1240,44 +1240,44 @@ function createBlueTiger() {
     }
   }
 
-  // Head — cube
+  // Head — cube (Z+ = forward direction)
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.6), blueMat);
-  head.position.set(0, 0.9, -1.0);
+  head.position.set(0, 0.9, 1.0);
   group.add(head);
 
   // Muzzle (white)
   const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.25, 0.2), whiteMat);
-  muzzle.position.set(0, 0.75, -1.3);
+  muzzle.position.set(0, 0.75, 1.3);
   group.add(muzzle);
 
   // Nose
   const nose = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.1, 0.05), noseMat);
-  nose.position.set(0, 0.85, -1.35);
+  nose.position.set(0, 0.85, 1.35);
   group.add(nose);
 
   // Eyes
   for (const side of [-1, 1]) {
     const eyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.05), whiteMat);
-    eyeWhite.position.set(side * 0.22, 1.0, -1.28);
+    eyeWhite.position.set(side * 0.22, 1.0, 1.28);
     group.add(eyeWhite);
     const pupil = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.06), eyeMat);
-    pupil.position.set(side * 0.22, 1.0, -1.3);
+    pupil.position.set(side * 0.22, 1.0, 1.3);
     group.add(pupil);
   }
 
   // Ears
   for (const side of [-1, 1]) {
     const ear = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, 0.1), blueMat);
-    ear.position.set(side * 0.25, 1.25, -0.9);
+    ear.position.set(side * 0.25, 1.25, 0.9);
     group.add(ear);
     const earInner = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.05), whiteMat);
-    earInner.position.set(side * 0.25, 1.25, -0.95);
+    earInner.position.set(side * 0.25, 1.25, 0.95);
     group.add(earInner);
   }
 
   // Head stripes
   const headStripe = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.1, 0.08), stripeMat);
-  headStripe.position.set(0, 1.1, -0.95);
+  headStripe.position.set(0, 1.1, 0.95);
   group.add(headStripe);
 
   // Legs — 4 legs
@@ -1296,21 +1296,21 @@ function createBlueTiger() {
     group.add(paw);
   }
 
-  // Tail — long and curved
+  // Tail — long and curved (behind = -Z)
   const tail1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), blueMat);
-  tail1.position.set(0, 0.9, 1.05);
-  tail1.rotation.x = -0.3;
+  tail1.position.set(0, 0.9, -1.05);
+  tail1.rotation.x = 0.3;
   group.add(tail1);
   const tail2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.3), blueMat);
-  tail2.position.set(0, 1.05, 1.3);
-  tail2.rotation.x = -0.6;
+  tail2.position.set(0, 1.05, -1.3);
+  tail2.rotation.x = 0.6;
   group.add(tail2);
   // Tail stripes
   const tailStripe1 = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.08), stripeMat);
-  tailStripe1.position.set(0, 0.9, 0.95);
+  tailStripe1.position.set(0, 0.9, -0.95);
   group.add(tailStripe1);
   const tailStripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.08), stripeMat);
-  tailStripe2.position.set(0, 1.0, 1.2);
+  tailStripe2.position.set(0, 1.0, -1.2);
   group.add(tailStripe2);
 
   const tx = -15, tz = 15;
