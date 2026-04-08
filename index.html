@@ -350,7 +350,7 @@ function createAnimatedClone(key, scale = 1) {
 }
 
 // ========== GLOBALS ==========
-let scene, camera, renderer;
+let scene, camera, renderer, sun;
 let horse, horseGroup;
 let clock = new THREE.Clock();
 let carrots = 0;
@@ -531,11 +531,11 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
   camera.position.set(0, 8, 12);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   // Bright, warm tone mapping
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.8;
@@ -551,17 +551,17 @@ function initScene() {
   scene.add(hemi);
 
   // Strong warm sun
-  const sun = new THREE.DirectionalLight(0xfff8e8, 1.8);
+  sun = new THREE.DirectionalLight(0xfff8e8, 1.8);
   sun.position.set(30, 40, 20);
   sun.castShadow = true;
-  sun.shadow.mapSize.width = 2048;
-  sun.shadow.mapSize.height = 2048;
+  sun.shadow.mapSize.width = 1024;
+  sun.shadow.mapSize.height = 1024;
   sun.shadow.camera.near = 0.5;
-  sun.shadow.camera.far = 100;
-  sun.shadow.camera.left = -40;
-  sun.shadow.camera.right = 40;
-  sun.shadow.camera.top = 40;
-  sun.shadow.camera.bottom = -40;
+  sun.shadow.camera.far = 60;
+  sun.shadow.camera.left = -20;
+  sun.shadow.camera.right = 20;
+  sun.shadow.camera.top = 20;
+  sun.shadow.camera.bottom = -20;
   scene.add(sun);
 
   // Clouds
@@ -895,7 +895,7 @@ function createBeachDecorations() {
     );
     rock.position.set(x, h + size * 0.3, z);
     rock.rotation.set(Math.random() * 2, Math.random() * 2, Math.random() * 2);
-    rock.castShadow = true;
+    rock.castShadow = false;
     scene.add(rock);
   }
 
@@ -1000,7 +1000,7 @@ function createFarm() {
     // Fence post
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 6), fenceMat);
     post.position.set(px, ph + 0.6, pz);
-    post.castShadow = true;
+    post.castShadow = false;
     scene.add(post);
 
     // Horizontal rails to next post
@@ -1126,7 +1126,7 @@ function createFarm() {
     new THREE.MeshStandardMaterial({ color: 0x666655, roughness: 0.9 })
   );
   trough.position.set(troughX, troughH + 0.25, troughZ);
-  trough.castShadow = true;
+  trough.castShadow = false;
   scene.add(trough);
   const troughWater = new THREE.Mesh(
     new THREE.PlaneGeometry(1.8, 0.6),
@@ -1535,7 +1535,7 @@ function createChallenge() {
   for (const side of [-1, 1]) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 4.5, 6), woodMat);
     post.position.set(side * 5.5, 2.25, 0);
-    post.castShadow = true;
+    post.castShadow = false;
     group.add(post);
     // Small cap on top
     const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), woodMat);
@@ -1650,7 +1650,7 @@ function createChallenge() {
     // Closed bucket (not open-ended)
     const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.5, 1.0, 12), bucketMat);
     bucket.position.y = 0.5;
-    bucket.castShadow = true;
+    bucket.castShadow = false;
     bucketPivot.add(bucket);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.04, 6, 16), new THREE.MeshLambertMaterial({ color: 0xaaaaaa }));
     rim.rotation.x = Math.PI / 2;
@@ -2488,7 +2488,31 @@ function update() {
   // Draw minimap
   drawMinimap();
 
+  // Shadow camera follows horse so small shadow map covers the action
+  if (sun) {
+    sun.position.set(horsePos.x + 30, 40, horsePos.z + 20);
+    sun.target.position.set(horsePos.x, 0, horsePos.z);
+    sun.target.updateMatrixWorld();
+  }
+
   renderer.render(scene, camera);
+
+  // Auto-degrade: disable shadows if FPS drops below 30
+  window.__fpsFrames = (window.__fpsFrames || 0) + 1;
+  if (!window.__fpsStart) window.__fpsStart = performance.now();
+  const elapsed = performance.now() - window.__fpsStart;
+  if (elapsed > 3000) {
+    const fps = window.__fpsFrames / elapsed * 1000;
+    if (fps < 30 && renderer.shadowMap.enabled) {
+      renderer.shadowMap.enabled = false;
+      scene.traverse(c => { c.castShadow = false; c.receiveShadow = false; });
+      renderer.shadowMap.needsUpdate = true;
+      console.log('Shadows disabled for performance (FPS was ' + fps.toFixed(0) + ')');
+    }
+    window.__fpsFrames = 0;
+    window.__fpsStart = performance.now();
+  }
+
   requestAnimationFrame(update);
 }
 
