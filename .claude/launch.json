@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "konik-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dev-server.mjs"],
+      "port": 3333,
+      "autoPort": false
+    }
+  ]
+}

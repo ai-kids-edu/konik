@@ -285,10 +285,10 @@ async function loadAllModels(onProgress) {
         if (gltf.animations && gltf.animations.length > 0) {
           modelAnimations[key] = gltf.animations;
         }
-        // Enable shadows on all meshes
+        // Enable shadows only on key meshes (not all — saves draw calls)
         gltf.scene.traverse((child) => {
           if (child.isMesh) {
-            child.castShadow = true;
+            child.castShadow = false;
             child.receiveShadow = true;
           }
         });
@@ -319,7 +319,7 @@ function cloneModel(key, scale = 1) {
   clone.traverse((child) => {
     if (child.isMesh) {
       child.material = child.material.clone();
-      child.castShadow = true;
+      child.castShadow = false;
       child.receiveShadow = true;
     }
   });
@@ -337,7 +337,7 @@ function createAnimatedClone(key, scale = 1) {
   clone.scale.setScalar(scale);
   clone.traverse((child) => {
     if (child.isMesh) {
-      child.castShadow = true;
+      child.castShadow = false;
       child.receiveShadow = true;
     }
   });
@@ -531,9 +531,10 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
   camera.position.set(0, 8, 12);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.0 : 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   // Bright, warm tone mapping
@@ -554,8 +555,8 @@ function initScene() {
   sun = new THREE.DirectionalLight(0xfff8e8, 1.8);
   sun.position.set(30, 40, 20);
   sun.castShadow = true;
-  sun.shadow.mapSize.width = 1024;
-  sun.shadow.mapSize.height = 1024;
+  sun.shadow.mapSize.width = 512;
+  sun.shadow.mapSize.height = 512;
   sun.shadow.camera.near = 0.5;
   sun.shadow.camera.far = 60;
   sun.shadow.camera.left = -20;
@@ -624,6 +625,10 @@ function initScene() {
 
   // Beach decorations (shells, rocks)
   createBeachDecorations();
+  createCrab();
+  createDalmatian();
+  createCheetah();
+  createBlueTiger();
 
   // Flying birds in the sky
   createFlyingBirds();
@@ -824,7 +829,7 @@ function animateClouds(dt) {
 let waterMesh;
 function createWater() {
   // Near-shore water (detailed, follows curved shoreline)
-  const segs = 80;
+  const segs = 40;
   const nearGeo = new THREE.PlaneGeometry(WORLD_SIZE, 60, segs, segs);
   nearGeo.rotateX(-Math.PI / 2);
   const positions = nearGeo.attributes.position.array;
@@ -935,6 +940,673 @@ function createPalmTree(x, baseY, z) {
     brightenModel(palm, 2.0);
     scene.add(palm);
   }
+}
+
+// ========== DALMATIAN WITH DOGHOUSE (near stable) ==========
+let dalmatianData;
+function createDalmatian() {
+  const fx = FARM_X, fz = FARM_Z;
+  const dx = fx + 18, dz = fz - 12; // near stable
+  const dh = getTerrainHeight(dx, dz);
+
+  // Doghouse from primitives
+  const houseMat = new THREE.MeshStandardMaterial({ color: 0x8B5A2B, roughness: 0.9 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x6B3A1B, roughness: 0.8 });
+  const houseGroup = new THREE.Group();
+  // Base box
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.4), houseMat);
+  base.position.y = 0.6;
+  houseGroup.add(base);
+  // Roof (triangular prism via extruded shape)
+  const roofGeo = new THREE.ConeGeometry(1.2, 0.7, 4);
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.position.y = 1.55;
+  roof.rotation.y = Math.PI / 4;
+  houseGroup.add(roof);
+  // Door hole (dark circle)
+  const door = new THREE.Mesh(
+    new THREE.CircleGeometry(0.35, 12),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+  );
+  door.position.set(0, 0.45, 0.71);
+  houseGroup.add(door);
+  houseGroup.position.set(dx, dh, dz);
+  scene.add(houseGroup);
+
+  // Dalmatian — husky model recolored white with black spots
+  const { model, mixer } = createAnimatedClone('husky', 0.22);
+  if (!model) return;
+  // Recolor to dalmatian (white base with black spots)
+  model.traverse(child => {
+    if (child.isMesh) {
+      child.material = child.material.clone();
+      child.material.color.set(0xf5f5f0);
+    }
+  });
+  brightenModel(model, 2.5);
+  // Black spots
+  const spotMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  const dalSpots = [
+    [0, 0.5, 0.15, 0.07], [0.1, 0.45, -0.1, 0.06], [-0.1, 0.48, 0.05, 0.08],
+    [0.08, 0.55, -0.15, 0.05], [-0.12, 0.52, -0.08, 0.06], [0.05, 0.42, 0.2, 0.07],
+    [-0.08, 0.58, 0.12, 0.05], [0.15, 0.5, 0.0, 0.06], [-0.05, 0.46, -0.2, 0.07],
+    [0.12, 0.6, 0.08, 0.05], [-0.14, 0.44, 0.15, 0.06], [0.0, 0.62, -0.05, 0.05],
+  ];
+  for (const [sx, sy, sz, sr] of dalSpots) {
+    const spot = new THREE.Mesh(new THREE.SphereGeometry(sr, 6, 4), spotMat);
+    spot.position.set(sx, sy, sz);
+    model.add(spot);
+  }
+
+  const group = new THREE.Group();
+  group.add(model);
+  // Start in front of doghouse
+  const startX = dx, startZ = dz + 2;
+  group.position.set(startX, getTerrainHeight(startX, startZ), startZ);
+
+  scene.add(group);
+
+  // Build animation actions
+  const actions = {};
+  if (mixer && modelAnimations.husky) {
+    for (const clip of modelAnimations.husky) {
+      const shortName = clip.name.replace(/.*\|/, '').toLowerCase();
+      actions[shortName] = mixer.clipAction(clip);
+    }
+    const idleAction = actions['idle'] || actions['idle_2'] || Object.values(actions)[0];
+    if (idleAction) idleAction.play();
+  }
+
+  dalmatianData = {
+    group, mixer, actions, currentGait: 'idle',
+    homeX: startX, homeZ: startZ,
+  };
+}
+
+function switchDalmatianAnim(name) {
+  if (!dalmatianData || dalmatianData.currentGait === name) return;
+  const prev = dalmatianData.actions[dalmatianData.currentGait];
+  const next = dalmatianData.actions[name];
+  if (prev) prev.fadeOut(0.2);
+  if (next) { next.reset().fadeIn(0.2).play(); }
+  dalmatianData.currentGait = name;
+}
+
+function updateDalmatian(dt) {
+  if (!dalmatianData) return;
+  const g = dalmatianData.group;
+  const dx = horsePos.x - g.position.x;
+  const dz = horsePos.z - g.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+
+  if (dist < 10) {
+    // Run toward horse
+    const angle = Math.atan2(dx, dz);
+    g.rotation.y = angle;
+    if (dist > 2) {
+      const speed = 3.0;
+      g.position.x += Math.sin(angle) * speed * dt;
+      g.position.z += Math.cos(angle) * speed * dt;
+      g.position.y = getTerrainHeight(g.position.x, g.position.z);
+      switchDalmatianAnim('gallop');
+    } else {
+      // Near horse — wag and idle
+      switchDalmatianAnim('idle');
+    }
+  } else {
+    // Wander near doghouse
+    const hdx = dalmatianData.homeX - g.position.x;
+    const hdz = dalmatianData.homeZ - g.position.z;
+    const homeDist = Math.sqrt(hdx * hdx + hdz * hdz);
+    if (homeDist > 5) {
+      // Go back home
+      const angle = Math.atan2(hdx, hdz);
+      g.rotation.y = angle;
+      g.position.x += Math.sin(angle) * 1.5 * dt;
+      g.position.z += Math.cos(angle) * 1.5 * dt;
+      g.position.y = getTerrainHeight(g.position.x, g.position.z);
+      switchDalmatianAnim('walk');
+    } else {
+      switchDalmatianAnim('idle');
+    }
+  }
+}
+
+// ========== CHEETAH (roams everywhere, gives apples) ==========
+let cheetahData;
+function createCheetah() {
+  // Use fox model scaled up big — cheetah is bigger than a fox!
+  const { model, mixer } = createAnimatedClone('fox', 0.45);
+  if (!model) return;
+  model.traverse(child => {
+    if (child.isMesh) {
+      child.material = child.material.clone();
+      child.material.color.set(0xdda520); // golden yellow
+    }
+  });
+  brightenModel(model, 2.2);
+
+  // Add dark spots as small spheres on the body
+  const spotMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const spotPositions = [
+    [0, 0.6, 0.1], [0.15, 0.55, -0.1], [-0.12, 0.58, 0.05],
+    [0.08, 0.5, -0.2], [-0.1, 0.52, -0.15], [0.05, 0.65, 0.15],
+    [-0.08, 0.48, 0.2], [0.12, 0.62, -0.05], [-0.15, 0.6, -0.1],
+    [0.1, 0.45, 0.12], [-0.05, 0.55, -0.25], [0.18, 0.5, 0.05],
+  ];
+  for (const [sx, sy, sz] of spotPositions) {
+    const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 4), spotMat);
+    spot.position.set(sx, sy, sz);
+    model.add(spot);
+  }
+
+  const group = new THREE.Group();
+  group.add(model);
+  const sx = 20, sz = 5;
+  group.position.set(sx, getTerrainHeight(sx, sz), sz);
+  scene.add(group);
+
+  const actions = {};
+  if (mixer && modelAnimations.fox) {
+    for (const clip of modelAnimations.fox) {
+      const shortName = clip.name.replace(/.*\|/, '').toLowerCase();
+      actions[shortName] = mixer.clipAction(clip);
+    }
+    const idleAction = actions['idle'] || Object.values(actions)[0];
+    if (idleAction) idleAction.play();
+  }
+
+  cheetahData = {
+    group, mixer, actions, currentGait: 'idle',
+    wanderAngle: Math.random() * Math.PI * 2,
+    wanderTimer: 0,
+    cooldown: 0,
+  };
+}
+
+function switchCheetahAnim(name) {
+  if (!cheetahData || cheetahData.currentGait === name) return;
+  const prev = cheetahData.actions[cheetahData.currentGait];
+  const next = cheetahData.actions[name];
+  if (prev) prev.fadeOut(0.2);
+  if (next) { next.reset().fadeIn(0.2).play(); }
+  cheetahData.currentGait = name;
+}
+
+function updateCheetah(dt) {
+  if (!cheetahData) return;
+  const g = cheetahData.group;
+  cheetahData.cooldown = Math.max(0, cheetahData.cooldown - dt);
+
+  const dx = horsePos.x - g.position.x;
+  const dz = horsePos.z - g.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+
+  if (dist < 8) {
+    const angle = Math.atan2(dx, dz);
+    g.rotation.y = angle;
+    if (dist > 2.5) {
+      // Run fast to horse (cheetah is fast!)
+      g.position.x += Math.sin(angle) * 5 * dt;
+      g.position.z += Math.cos(angle) * 5 * dt;
+      g.position.y = getTerrainHeight(g.position.x, g.position.z);
+      switchCheetahAnim('gallop');
+    } else {
+      switchCheetahAnim('idle');
+      // Give bed when close
+      if (cheetahData.cooldown <= 0 && !isEatingCarrots) {
+        cheetahData.cooldown = 30;
+        giveApplesFromCheetah();
+      }
+    }
+  } else {
+    // Roam everywhere
+    cheetahData.wanderTimer -= dt;
+    if (cheetahData.wanderTimer <= 0) {
+      cheetahData.wanderAngle += (Math.random() - 0.5) * 2.5;
+      cheetahData.wanderTimer = 2 + Math.random() * 4;
+    }
+    const speed = 2.5;
+    let nx = g.position.x + Math.sin(cheetahData.wanderAngle) * speed * dt;
+    let nz = g.position.z + Math.cos(cheetahData.wanderAngle) * speed * dt;
+    // Keep in world bounds, away from water
+    const bsz = beachStartZ(nx);
+    nx = THREE.MathUtils.clamp(nx, -85, 85);
+    nz = THREE.MathUtils.clamp(nz, -85, bsz - 3);
+    g.position.x = nx;
+    g.position.z = nz;
+    g.position.y = getTerrainHeight(nx, nz);
+    g.rotation.y = cheetahData.wanderAngle;
+    switchCheetahAnim('walk');
+  }
+}
+
+function giveApplesFromCheetah() {
+  // Spawn apples in front of horse
+  const spawnX = horsePos.x + Math.sin(horseAngle) * 1.5;
+  const spawnZ = horsePos.z + Math.cos(horseAngle) * 1.5;
+  const spawnY = getTerrainHeight(spawnX, spawnZ);
+  const appleGrp = new THREE.Group();
+  appleGrp.position.set(spawnX, spawnY, spawnZ);
+  const appleMat = new THREE.MeshStandardMaterial({ color: 0xff2222, roughness: 0.4, metalness: 0.1 });
+  for (let i = 0; i < 3; i++) {
+    const apple = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), appleMat);
+    apple.position.set((Math.random() - 0.5) * 0.8, 0.15, 0.3 + Math.random() * 0.6);
+    appleGrp.add(apple);
+  }
+  scene.add(appleGrp);
+
+  applesCollected += 3;
+  updateCarrotHUD();
+
+  // Confetti celebration
+  if (typeof createConfetti === 'function') createConfetti(horsePos.x, horsePos.y + 2, horsePos.z);
+
+  // Remove apples after a few seconds
+  setTimeout(() => { scene.remove(appleGrp); }, 4000);
+}
+
+// ========== BLUE TIGER (horse gives him meat, he jumps happy) ==========
+let tigerData;
+function createBlueTiger() {
+  const blueMat = new THREE.MeshStandardMaterial({ color: 0x2277cc, roughness: 0.6 });
+  const stripeMat = new THREE.MeshStandardMaterial({ color: 0x112244, roughness: 0.7 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xccddff, roughness: 0.5 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  const noseMat = new THREE.MeshStandardMaterial({ color: 0x224466 });
+
+  const group = new THREE.Group();
+
+  // Body — long box
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 1.6), blueMat);
+  body.position.y = 0.75;
+  group.add(body);
+
+  // Belly (white underside)
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 1.3), whiteMat);
+  belly.position.y = 0.45;
+  group.add(belly);
+
+  // Stripes on body — dark bands across the back
+  for (let i = 0; i < 6; i++) {
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.12, 0.08), stripeMat);
+    stripe.position.set(0, 0.95, -0.55 + i * 0.22);
+    group.add(stripe);
+    // Side stripes
+    for (const side of [-1, 1]) {
+      const sideStripe = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.07), stripeMat);
+      sideStripe.position.set(side * 0.44, 0.75, -0.55 + i * 0.22);
+      group.add(sideStripe);
+    }
+  }
+
+  // Head — cube
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.6), blueMat);
+  head.position.set(0, 0.9, -1.0);
+  group.add(head);
+
+  // Muzzle (white)
+  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.25, 0.2), whiteMat);
+  muzzle.position.set(0, 0.75, -1.3);
+  group.add(muzzle);
+
+  // Nose
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.1, 0.05), noseMat);
+  nose.position.set(0, 0.85, -1.35);
+  group.add(nose);
+
+  // Eyes
+  for (const side of [-1, 1]) {
+    const eyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.05), whiteMat);
+    eyeWhite.position.set(side * 0.22, 1.0, -1.28);
+    group.add(eyeWhite);
+    const pupil = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.06), eyeMat);
+    pupil.position.set(side * 0.22, 1.0, -1.3);
+    group.add(pupil);
+  }
+
+  // Ears
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, 0.1), blueMat);
+    ear.position.set(side * 0.25, 1.25, -0.9);
+    group.add(ear);
+    const earInner = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.05), whiteMat);
+    earInner.position.set(side * 0.25, 1.25, -0.95);
+    group.add(earInner);
+  }
+
+  // Head stripes
+  const headStripe = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.1, 0.08), stripeMat);
+  headStripe.position.set(0, 1.1, -0.95);
+  group.add(headStripe);
+
+  // Legs — 4 legs
+  const legPositions = [[-0.3, -0.65], [0.3, -0.65], [-0.3, 0.55], [0.3, 0.55]];
+  for (const [lx, lz] of legPositions) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.55, 0.22), blueMat);
+    leg.position.set(lx, 0.28, lz);
+    group.add(leg);
+    // Stripe on leg
+    const legStripe = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.08, 0.23), stripeMat);
+    legStripe.position.set(lx, 0.35, lz);
+    group.add(legStripe);
+    // Paw (white)
+    const paw = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.26), whiteMat);
+    paw.position.set(lx, 0.05, lz);
+    group.add(paw);
+  }
+
+  // Tail — long and curved
+  const tail1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), blueMat);
+  tail1.position.set(0, 0.9, 1.05);
+  tail1.rotation.x = -0.3;
+  group.add(tail1);
+  const tail2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.3), blueMat);
+  tail2.position.set(0, 1.05, 1.3);
+  tail2.rotation.x = -0.6;
+  group.add(tail2);
+  // Tail stripes
+  const tailStripe1 = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.08), stripeMat);
+  tailStripe1.position.set(0, 0.9, 0.95);
+  group.add(tailStripe1);
+  const tailStripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.08), stripeMat);
+  tailStripe2.position.set(0, 1.0, 1.2);
+  group.add(tailStripe2);
+
+  const tx = -15, tz = 15;
+  group.position.set(tx, getTerrainHeight(tx, tz), tz);
+  scene.add(group);
+
+  tigerData = {
+    group, mixer: null, actions: {}, currentGait: 'idle',
+    cooldown: 0,
+    happyTimer: 0,
+    wanderAngle: Math.random() * Math.PI * 2,
+    wanderTimer: 0,
+    baseX: tx, baseZ: tz,
+    walkBob: 0, // for leg animation
+  };
+}
+
+function switchTigerAnim(name) {
+  if (tigerData) tigerData.currentGait = name;
+}
+
+function updateBlueTiger(dt) {
+  if (!tigerData) return;
+  const g = tigerData.group;
+  tigerData.cooldown = Math.max(0, tigerData.cooldown - dt);
+  tigerData.walkBob += dt;
+
+  // Happy celebration mode — run around and jump!
+  if (tigerData.happyTimer > 0) {
+    tigerData.happyTimer -= dt;
+    // Run in circles and bounce
+    tigerData.wanderAngle += 4 * dt;
+    const speed = 4;
+    g.position.x += Math.sin(tigerData.wanderAngle) * speed * dt;
+    g.position.z += Math.cos(tigerData.wanderAngle) * speed * dt;
+    const baseY = getTerrainHeight(g.position.x, g.position.z);
+    // Jumping bounce
+    g.position.y = baseY + Math.abs(Math.sin(tigerData.happyTimer * 6)) * 1.5;
+    g.rotation.y = tigerData.wanderAngle;
+    switchTigerAnim('gallop');
+    return;
+  }
+
+  const dx = horsePos.x - g.position.x;
+  const dz = horsePos.z - g.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+
+  if (dist < 6) {
+    // Face horse
+    g.rotation.y = Math.atan2(dx, dz);
+    switchTigerAnim('idle');
+    // Horse gives meat when close
+    if (dist < 2.5 && tigerData.cooldown <= 0) {
+      tigerData.cooldown = 30;
+      giveMeatToTiger();
+    }
+  } else {
+    // Gentle wander
+    tigerData.wanderTimer -= dt;
+    if (tigerData.wanderTimer <= 0) {
+      tigerData.wanderAngle += (Math.random() - 0.5) * 2;
+      tigerData.wanderTimer = 3 + Math.random() * 5;
+    }
+    let nx = g.position.x + Math.sin(tigerData.wanderAngle) * 0.8 * dt;
+    let nz = g.position.z + Math.cos(tigerData.wanderAngle) * 0.8 * dt;
+    const bsz = beachStartZ(nx);
+    nx = THREE.MathUtils.clamp(nx, -85, 85);
+    nz = THREE.MathUtils.clamp(nz, -85, bsz - 3);
+    g.position.x = nx;
+    g.position.z = nz;
+    g.position.y = getTerrainHeight(nx, nz);
+    g.rotation.y = tigerData.wanderAngle;
+    switchTigerAnim('walk');
+  }
+
+  // Simple walk/run bobbing animation
+  const gait = tigerData.currentGait;
+  if (gait === 'walk' || gait === 'gallop') {
+    const bobSpeed = gait === 'gallop' ? 12 : 6;
+    g.rotation.z = Math.sin(tigerData.walkBob * bobSpeed) * 0.08;
+  } else {
+    g.rotation.z = 0;
+  }
+}
+
+function giveMeatToTiger() {
+  // Spawn meat in front of tiger
+  const g = tigerData.group;
+  const meatGroup = new THREE.Group();
+  const meatMat = new THREE.MeshStandardMaterial({ color: 0x993333, roughness: 0.6 });
+  const boneMat = new THREE.MeshStandardMaterial({ color: 0xeeddcc, roughness: 0.5 });
+  // Meat chunk
+  const meat = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), meatMat);
+  meat.scale.set(1.5, 0.8, 1.0);
+  meat.position.y = 0.15;
+  meatGroup.add(meat);
+  // Bone sticking out
+  const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 6), boneMat);
+  bone.position.set(0.25, 0.15, 0);
+  bone.rotation.z = Math.PI / 2;
+  meatGroup.add(bone);
+  // Bone ends
+  for (const side of [-1, 1]) {
+    const end = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), boneMat);
+    end.position.set(0.25 + side * 0.2, 0.15, 0);
+    meatGroup.add(end);
+  }
+
+  meatGroup.position.copy(g.position);
+  meatGroup.position.y += 0.1;
+  scene.add(meatGroup);
+
+  // Tiger eats (shrink meat) then celebrates
+  setTimeout(() => {
+    const shrinkStart = Date.now();
+    function shrinkMeat() {
+      const t = (Date.now() - shrinkStart) / 500;
+      if (t >= 1) {
+        scene.remove(meatGroup);
+        // Tiger is happy! Jump and run around!
+        tigerData.happyTimer = 5;
+        if (typeof createConfetti === 'function') createConfetti(g.position.x, g.position.y + 2, g.position.z);
+        return;
+      }
+      const s = 1 - t;
+      meatGroup.scale.set(s, s, s);
+      meatGroup.position.y += 0.005;
+      requestAnimationFrame(shrinkMeat);
+    }
+    shrinkMeat();
+  }, 800);
+}
+
+// ========== BEACH CRAB (friend of the horse) ==========
+let crabGroup, crabData;
+function createCrab() {
+  const cx = 8, cz = 10;
+  const ch = getTerrainHeight(cx, cz);
+  console.log('CRAB CREATED at', cx, ch, cz);
+  crabGroup = new THREE.Group();
+  crabGroup.position.set(cx, ch + 0.5, cz);
+  crabGroup.scale.setScalar(3);
+
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe84420, roughness: 0.6 });
+  const clawMat = new THREE.MeshStandardMaterial({ color: 0xff6633, roughness: 0.5 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffeecc });
+
+  // Body — wide ellipsoid
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 8), bodyMat);
+  body.scale.set(1.4, 0.6, 1.0);
+  body.position.y = 0.25;
+  crabGroup.add(body);
+
+  // Eyes on stalks
+  for (const side of [-1, 1]) {
+    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.2, 6), eyeWhite);
+    stalk.position.set(side * 0.15, 0.55, -0.15);
+    crabGroup.add(stalk);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), eyeMat);
+    eye.position.set(side * 0.15, 0.67, -0.15);
+    crabGroup.add(eye);
+  }
+
+  // Legs — 3 per side
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const angle = (i - 1) * 0.5 + side * 0.2;
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.35, 5), bodyMat);
+      leg.position.set(side * 0.42, 0.12, -0.15 + i * 0.15);
+      leg.rotation.z = side * 0.8;
+      leg.rotation.y = angle;
+      crabGroup.add(leg);
+    }
+  }
+
+  // Claws
+  for (const side of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.035, 0.3, 6), clawMat);
+    arm.position.set(side * 0.5, 0.3, -0.25);
+    arm.rotation.z = side * 1.0;
+    crabGroup.add(arm);
+    // Pincer — two small flattened spheres
+    const pincer = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), clawMat);
+    pincer.scale.set(0.6, 0.4, 1.0);
+    pincer.position.set(side * 0.7, 0.38, -0.25);
+    crabGroup.add(pincer);
+  }
+
+  scene.add(crabGroup);
+
+  crabData = {
+    baseX: cx, baseZ: cz,
+    wobbleTime: 0,
+    cooldown: 0, // seconds until crab can give carrots again
+    wanderAngle: 0,
+    wanderTimer: 0,
+  };
+}
+
+function updateCrab(dt) {
+  if (!crabGroup || !crabData) return;
+  crabData.wobbleTime += dt;
+  crabData.cooldown = Math.max(0, crabData.cooldown - dt);
+
+  const dx = horsePos.x - crabGroup.position.x;
+  const dz = horsePos.z - crabGroup.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+
+  if (dist < 6) {
+    // Face the horse
+    crabGroup.rotation.y = Math.atan2(dx, dz);
+    if (dist < 2 && crabData.cooldown <= 0 && !isEatingCarrots) {
+      // Give carrots!
+      crabData.cooldown = 30;
+      giveCarrotsFromCrab();
+    }
+  } else {
+    // Gentle sideways wander on beach
+    crabData.wanderTimer -= dt;
+    if (crabData.wanderTimer <= 0) {
+      crabData.wanderAngle += (Math.random() - 0.5) * 2;
+      crabData.wanderTimer = 3 + Math.random() * 4;
+    }
+    const speed = 0.3;
+    let nx = crabGroup.position.x + Math.sin(crabData.wanderAngle) * speed * dt;
+    let nz = crabGroup.position.z + Math.cos(crabData.wanderAngle) * speed * dt;
+    // Keep on beach
+    const bsz = beachStartZ(nx), wsz = waterStartZ(nx);
+    if (nz < bsz + 2) nz = bsz + 2;
+    if (nz > wsz - 2) nz = wsz - 2;
+    if (nx < -50) nx = -50;
+    if (nx > 50) nx = 50;
+    crabGroup.position.x = nx;
+    crabGroup.position.z = nz;
+    crabGroup.position.y = getTerrainHeight(nx, nz);
+    crabGroup.rotation.y = crabData.wanderAngle;
+  }
+
+  // Wobble animation (side to side rocking)
+  crabGroup.rotation.z = Math.sin(crabData.wobbleTime * 3) * 0.1;
+}
+
+function giveCarrotsFromCrab() {
+  // Spawn carrots in front of horse and trigger eating
+  const spawnX = horsePos.x + Math.sin(horseAngle) * 1.5;
+  const spawnZ = horsePos.z + Math.cos(horseAngle) * 1.5;
+  const spawnY = getTerrainHeight(spawnX, spawnZ);
+  const carrotsGrp = new THREE.Group();
+  carrotsGrp.position.set(spawnX, spawnY, spawnZ);
+  const carrotMeshes = [];
+  for (let i = 0; i < 3; i++) {
+    const c = cloneModel('carrot', 0.8);
+    if (!c) continue;
+    c.position.set((Math.random() - 0.5) * 0.8, 0.15, 0.3 + Math.random() * 0.6);
+    c.rotation.set(0, Math.random() * Math.PI, Math.PI / 2);
+    brightenModel(c, 2.0);
+    carrotsGrp.add(c);
+    carrotMeshes.push(c);
+  }
+  scene.add(carrotsGrp);
+
+  // Horse walks to carrots and eats
+  horseSpeed = 0;
+  const dx2 = spawnX - horsePos.x, dz2 = spawnZ - horsePos.z;
+  horseAngle = Math.atan2(dx2, dz2);
+  horseGroup.rotation.y = horseAngle;
+
+  isEatingCarrots = true;
+  playHorseAnimation('eating', 2500);
+
+  // Shrink carrots one by one
+  const eatDelay = 1500 / (carrotMeshes.length + 1);
+  carrotMeshes.forEach((carrot, idx) => {
+    setTimeout(() => {
+      const shrinkStart = Date.now();
+      function shrink() {
+        const t = (Date.now() - shrinkStart) / 300;
+        if (t >= 1) { carrot.visible = false; return; }
+        const s = 1 - t;
+        carrot.scale.set(s, s, s);
+        carrot.position.y += 0.01;
+        requestAnimationFrame(shrink);
+      }
+      shrink();
+    }, 600 + (idx + 1) * eatDelay);
+  });
+
+  // Update score
+  carrots += 3;
+  updateCarrotHUD();
+
+  setTimeout(() => {
+    isEatingCarrots = false;
+    scene.remove(carrotsGrp);
+  }, 2500);
 }
 
 // ========== FLYING BIRDS ==========
@@ -1484,7 +2156,8 @@ function createHorse() {
     horse = body;
   }
 
-  horseGroup.castShadow = true;
+  // Only horse casts shadow (other models don't, for performance)
+  horseGroup.traverse(c => { if (c.isMesh) c.castShadow = true; });
   scene.add(horseGroup);
 }
 
@@ -2388,9 +3061,15 @@ function update() {
   }
 
   // Animate water, clouds, and birds
-  animateWater(clock.elapsedTime);
+  // Animate water every 2nd frame
+  window.__waterFrame = (window.__waterFrame || 0) + 1;
+  if (window.__waterFrame % 2 === 0) animateWater(clock.elapsedTime);
   animateClouds(dt);
   animateBirds(dt);
+  updateCrab(dt);
+  updateDalmatian(dt);
+  updateCheetah(dt);
+  updateBlueTiger(dt);
 
   // Remove far-away challenges (2D distance)
   for (let i = challenges.length - 1; i >= 0; i--) {
@@ -2485,8 +3164,9 @@ function update() {
     }
   }
 
-  // Draw minimap
-  drawMinimap();
+  // Draw minimap (throttled — every 3rd frame)
+  window.__minimapFrame = (window.__minimapFrame || 0) + 1;
+  if (window.__minimapFrame % 3 === 0) drawMinimap();
 
   // Shadow camera follows horse so small shadow map covers the action
   if (sun) {
