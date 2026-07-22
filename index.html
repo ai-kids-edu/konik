@@ -453,6 +453,17 @@ const FARM_X = -45;
 const FARM_Z = -30;
 const FARM_RADIUS = 32;
 
+// Passenger quest destinations — used by the townsperson delivery quest.
+// name = grammatically-correct destination phrase (Polish), hudName = short label.
+const PASSENGER_DESTINATIONS = [
+  { name: 'na farmę',    hudName: 'farma',  emoji: '🚜', x: FARM_X, z: FARM_Z },
+  { name: 'na plażę',    hudName: 'plaża',  emoji: '🏖️', x: 0,      z: 60 },
+  { name: 'do saloonu',  hudName: 'saloon', emoji: '🥤', x: -12,    z: CITY_CENTER_Z + 14 },
+  { name: 'do kowala',   hudName: 'kowal',  emoji: '🧲', x: 12,     z: CITY_CENTER_Z - 20 },
+  { name: 'do banku',    hudName: 'bank',   emoji: '💎', x: -12,    z: CITY_CENTER_Z - 22 },
+  { name: 'na pocztę',   hudName: 'poczta', emoji: '💌', x: 12,     z: CITY_CENTER_Z - 2 },
+];
+
 // ========== COORDINATE CONVENTION ==========
 // Movement angle: 0 = +Z, PI/2 = +X. Direction = (sin(a), 0, cos(a))
 // Models are built facing +X. To make a model face movement angle `a`:
@@ -1293,6 +1304,165 @@ function showDeliveryPopup() {
     if (deliveryPopupEl) {
       deliveryPopupEl.style.opacity = '0';
       deliveryPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    }
+  }, 1600);
+}
+
+// ========== PASSENGER DELIVERY QUEST ==========
+function isTownsperson(farmer) {
+  const p = farmer.group.position;
+  const dfx = p.x - FARM_X, dfz = p.z - FARM_Z;
+  const inFarm = Math.sqrt(dfx * dfx + dfz * dfz) < FARM_RADIUS;
+  return !inFarm && p.z < ROAD_SOUTH_EDGE;
+}
+
+function activePassengerCount() {
+  let n = 0;
+  for (const f of farmers) if (f.quest) n++;
+  return n;
+}
+
+function createPassengerMarker() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(64, 64, 58, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#dc1a1a'; ctx.lineWidth = 8;
+  ctx.stroke();
+  ctx.fillStyle = '#dc1a1a';
+  ctx.font = 'bold 100px Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('!', 64, 70);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sprite.scale.set(0.7, 0.7, 1);
+  sprite.position.set(0, 2.5, 0);
+  sprite.userData.baseY = 2.5;
+  sprite.renderOrder = 999;
+  return sprite;
+}
+
+function assignNewPassengerQuest() {
+  const target = 2;
+  let guard = 0;
+  while (activePassengerCount() < target && guard++ < 20) {
+    const candidates = farmers.filter(f => isTownsperson(f) && !f.quest && !f.mounted);
+    if (candidates.length === 0) break;
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    const dests = PASSENGER_DESTINATIONS.filter(d => {
+      const dx = pick.group.position.x - d.x;
+      const dz = pick.group.position.z - d.z;
+      return Math.sqrt(dx * dx + dz * dz) > 40;
+    });
+    const dest = dests.length ? dests[Math.floor(Math.random() * dests.length)] : PASSENGER_DESTINATIONS[0];
+    const reward = 2 + Math.floor(Math.random() * 2); // 2 or 3
+    pick.quest = { destination: dest, reward };
+    pick.questMarker = createPassengerMarker();
+    pick.group.add(pick.questMarker);
+  }
+}
+
+let passengerBubbleEl = null;
+function updatePassengerBubble(farmer) {
+  if (!passengerBubbleEl) {
+    passengerBubbleEl = document.createElement('div');
+    passengerBubbleEl.style.cssText = 'position:absolute;top:30%;left:50%;transform:translateX(-50%);'
+      + 'background:rgba(20,10,4,0.85);color:#fff;padding:22px 40px;border-radius:20px;'
+      + 'font-size:36px;font-weight:800;pointer-events:none;z-index:155;text-align:center;'
+      + 'border:4px solid #ffcc33;box-shadow:0 10px 40px rgba(0,0,0,0.6);'
+      + 'transition:opacity 0.2s;opacity:0;line-height:1.35;'
+      + 'text-shadow:2px 2px 0 rgba(0,0,0,0.6);'
+      + 'font-family:"Segoe UI",Tahoma,sans-serif;max-width:90vw;';
+    // Speech bubble tail
+    const tail = document.createElement('div');
+    tail.style.cssText = 'position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);'
+      + 'color:#ffcc33;font-size:44px;line-height:1;text-shadow:none;';
+    tail.textContent = '▼';
+    passengerBubbleEl.appendChild(tail);
+    document.body.appendChild(passengerBubbleEl);
+  }
+  if (!farmer) {
+    passengerBubbleEl.style.opacity = '0';
+    return;
+  }
+  const q = farmer.quest;
+  const kbdStyle = 'display:inline-block;background:#f6d990;color:#3a1d08;'
+    + 'padding:4px 18px;border-radius:10px;font-family:monospace;'
+    + 'font-size:44px;font-weight:900;margin:0 6px;'
+    + 'text-shadow:none;box-shadow:0 3px 0 #b89040,inset 0 -3px 0 rgba(0,0,0,0.15);'
+    + 'vertical-align:middle;';
+  const html =
+      `<div style="font-size:64px;line-height:1">${q.destination.emoji}</div>`
+    + `<div style="margin-top:10px">„Zawieziesz mnie ${q.destination.name}?"</div>`
+    + `<div style="margin-top:12px;font-size:32px;color:#ffdd77">Zapłacę ${q.reward} <span style="font-size:40px">🪙</span></div>`
+    + `<div style="margin-top:14px;font-size:28px;opacity:0.9">Naciśnij <span style="${kbdStyle}">SPACJA</span> żeby wsiąść</div>`;
+  // Preserve the tail child by rebuilding safely
+  passengerBubbleEl.innerHTML = html
+    + '<div style="position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);color:#ffcc33;font-size:44px;line-height:1;text-shadow:none;">▼</div>';
+  passengerBubbleEl.style.opacity = '1';
+}
+
+let passengerHudEl = null;
+function updatePassengerHudIndicator() {
+  if (!passengerHudEl) {
+    passengerHudEl = document.createElement('div');
+    passengerHudEl.style.cssText = 'position:fixed;top:90px;right:20px;'
+      + 'background:rgba(0,0,0,0.6);color:#fff;padding:10px 18px;border-radius:14px;'
+      + 'font-size:26px;font-weight:800;pointer-events:none;z-index:12;'
+      + 'border:3px solid #f6d990;box-shadow:0 4px 16px rgba(0,0,0,0.4);'
+      + 'font-family:"Segoe UI",Tahoma,sans-serif;display:none;'
+      + 'text-shadow:1px 1px 0 rgba(0,0,0,0.5);';
+    document.body.appendChild(passengerHudEl);
+  }
+  if (ridingFarmer && ridingFarmer.quest) {
+    const q = ridingFarmer.quest;
+    passengerHudEl.innerHTML = `→ ${q.destination.emoji} ${q.destination.hudName} · ${q.reward} <span style="font-size:30px">🪙</span>`;
+    passengerHudEl.style.display = 'block';
+  } else {
+    passengerHudEl.style.display = 'none';
+  }
+}
+
+function updatePassengerQuests(dt) {
+  const t = clock.elapsedTime * 6;
+  for (const f of farmers) {
+    if (!f.questMarker) continue;
+    f.questMarker.position.y = f.questMarker.userData.baseY + Math.sin(t) * 0.15;
+  }
+  let bubble = null, best = Infinity;
+  for (const f of farmers) {
+    if (!f.quest) continue;
+    if (f.mounted) continue;
+    const p = f.group.position;
+    const dx = horsePos.x - p.x, dz = horsePos.z - p.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < 25 && d2 < best) { best = d2; bubble = f; }
+  }
+  updatePassengerBubble(bubble);
+  updatePassengerHudIndicator();
+}
+
+let passengerDeliveryPopupEl = null;
+function showPassengerDeliveryPopup(reward) {
+  if (!passengerDeliveryPopupEl) {
+    passengerDeliveryPopupEl = document.createElement('div');
+    passengerDeliveryPopupEl.style.cssText = 'position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);'
+      + 'background:linear-gradient(135deg,#66cc44,#33aa22);color:#fff;padding:28px 52px;'
+      + 'border-radius:28px;font-size:52px;font-weight:900;pointer-events:none;'
+      + 'text-shadow:2px 2px 0 rgba(0,0,0,0.4);z-index:210;'
+      + 'box-shadow:0 12px 40px rgba(0,0,0,0.5);border:4px solid #fff;'
+      + 'transition:opacity 0.4s,transform 0.4s;opacity:0;text-align:center;';
+    document.body.appendChild(passengerDeliveryPopupEl);
+  }
+  passengerDeliveryPopupEl.innerHTML = `Dowiozłeś! +${reward} <span style="font-size:64px">🪙</span>`;
+  passengerDeliveryPopupEl.style.opacity = '1';
+  passengerDeliveryPopupEl.style.transform = 'translate(-50%,-50%) scale(1.15)';
+  setTimeout(() => {
+    if (passengerDeliveryPopupEl) {
+      passengerDeliveryPopupEl.style.opacity = '0';
+      passengerDeliveryPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
     }
   }, 1600);
 }
@@ -4703,8 +4873,20 @@ function handleSpaceAction() {
     const farmer = ridingFarmer;
     ridingFarmer = null;
     // Place farmer next to horse
-    const dropX = horsePos.x - Math.sin(horseAngle) * 2 + Math.cos(horseAngle) * 2;
-    const dropZ = horsePos.z - Math.cos(horseAngle) * 2 - Math.sin(horseAngle) * 2;
+    let dropX = horsePos.x - Math.sin(horseAngle) * 2 + Math.cos(horseAngle) * 2;
+    let dropZ = horsePos.z - Math.cos(horseAngle) * 2 - Math.sin(horseAngle) * 2;
+
+    // Delivery check — passenger quest
+    let delivered = false;
+    if (farmer.quest) {
+      const dx = horsePos.x - farmer.quest.destination.x;
+      const dz = horsePos.z - farmer.quest.destination.z;
+      if (Math.sqrt(dx * dx + dz * dz) < 6) {
+        delivered = true;
+        dropX = farmer.quest.destination.x;
+        dropZ = farmer.quest.destination.z;
+      }
+    }
     const dropH = getTerrainHeight(dropX, dropZ);
     // Remove from horse group, add back to scene
     horseGroup.remove(farmer.group);
@@ -4713,6 +4895,20 @@ function handleSpaceAction() {
     farmer.group.scale.set(1.4, 1.4, 1.4);
     scene.add(farmer.group);
     farmer.mounted = false;
+
+    if (delivered) {
+      const reward = farmer.quest.reward;
+      money += reward;
+      showPassengerDeliveryPopup(reward);
+      spawnCoinBurst(dropX, dropZ, 8);
+      if (farmer.questMarker) {
+        farmer.group.remove(farmer.questMarker);
+        farmer.questMarker = null;
+      }
+      farmer.quest = null;
+      updateCarrotHUD();
+      assignNewPassengerQuest();
+    }
     return;
   }
 
@@ -4936,6 +5132,7 @@ function update() {
   animateCoinBurst(dt);
   updateInteractionZones(dt);
   updateLetterDelivery(dt);
+  updatePassengerQuests(dt);
   updateCrab(dt);
   updateDalmatian(dt);
   updateCheetah(dt);
@@ -5564,6 +5761,9 @@ window.startGame = async function () {
     // Spawn initial challenges
     for (let i = 0; i < 3; i++) createChallenge();
   }
+
+  // Assign initial passenger delivery quests to townspeople
+  if (farmers.length > 0) assignNewPassengerQuest();
 
   // Save state periodically
   setInterval(saveState, 500);
