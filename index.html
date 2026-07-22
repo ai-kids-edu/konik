@@ -5288,47 +5288,33 @@ function animateHorse(dt, moving) {
 // ========== SPACE ACTION (mount/dismount farmer) ==========
 function handleSpaceAction() {
   if (ridingFarmer) {
-    // Dismount — put farmer back in world
     const farmer = ridingFarmer;
-    ridingFarmer = null;
-    // Place farmer next to horse
-    let dropX = horsePos.x - Math.sin(horseAngle) * 2 + Math.cos(horseAngle) * 2;
-    let dropZ = horsePos.z - Math.cos(horseAngle) * 2 - Math.sin(horseAngle) * 2;
 
-    // Delivery check — passenger quest (12m radius — farm animals etc. cluster
-    // around FARM_X/FARM_Z so kid parks at edge, still counts as arrival).
-    let delivered = false;
+    // Delivery — single owner. If parked within reach of the quest destination,
+    // completePassengerDelivery handles detach, payout, marker cleanup, the
+    // away-timer (so the passenger later asks to be brought home), and the next
+    // quest. Radius is PASSENGER_DELIVERY_RADIUS (farm animals cluster around
+    // FARM_X/FARM_Z, so parking at the edge still counts as arrival).
     if (farmer.quest) {
       const dx = horsePos.x - farmer.quest.destination.x;
       const dz = horsePos.z - farmer.quest.destination.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 12) {
-        delivered = true;
-        dropX = farmer.quest.destination.x;
-        dropZ = farmer.quest.destination.z;
+      if (Math.sqrt(dx * dx + dz * dz) < PASSENGER_DELIVERY_RADIUS) {
+        completePassengerDelivery(farmer);
+        return;
       }
     }
+
+    // Plain dismount (not at a destination) — drop the farmer beside the horse.
+    ridingFarmer = null;
+    const dropX = horsePos.x - Math.sin(horseAngle) * 2 + Math.cos(horseAngle) * 2;
+    const dropZ = horsePos.z - Math.cos(horseAngle) * 2 - Math.sin(horseAngle) * 2;
     const dropH = getTerrainHeight(dropX, dropZ);
-    // Remove from horse group, add back to scene
     horseGroup.remove(farmer.group);
     farmer.group.position.set(dropX, dropH, dropZ);
     farmer.group.rotation.y = angleToRotationY(horseAngle);
     farmer.group.scale.set(1.4, 1.4, 1.4);
     scene.add(farmer.group);
     farmer.mounted = false;
-
-    if (delivered) {
-      const reward = farmer.quest.reward;
-      money += reward;
-      showPassengerDeliveryPopup(reward);
-      spawnCoinBurst(dropX, dropZ, 8);
-      if (farmer.questMarker) {
-        farmer.group.remove(farmer.questMarker);
-        farmer.questMarker = null;
-      }
-      farmer.quest = null;
-      updateCarrotHUD();
-      assignNewPassengerQuest();
-    }
     return;
   }
 
