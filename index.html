@@ -4934,12 +4934,12 @@ function saveState() {
     challenges: savedChallenges,
     gameStarted: true,
   };
-  sessionStorage.setItem('horseGameState', JSON.stringify(state));
+  localStorage.setItem('horseGameState', JSON.stringify(state));
 }
 
 function loadState() {
   try {
-    const raw = sessionStorage.getItem('horseGameState');
+    const raw = localStorage.getItem('horseGameState');
     if (!raw) return null;
     return JSON.parse(raw);
   } catch { return null; }
@@ -5053,7 +5053,7 @@ function showQuestion(challenge) {
 }
 
 function resetGame() {
-  sessionStorage.removeItem('horseGameState');
+  localStorage.removeItem('horseGameState');
   location.reload();
 }
 
