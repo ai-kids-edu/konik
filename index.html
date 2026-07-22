@@ -388,6 +388,7 @@ let drinkTimer = 0;
 
 // Horse movement
 const horsePos = new THREE.Vector3(0, 0, 0);
+window.__horse = { get pos() { return horsePos; }, get angle() { return horseAngle; }, set angle(v) { horseAngle = v; } };
 let horseAngle = 0;
 let horseSpeed = 0;
 const BASE_SPEED = 8;
@@ -398,8 +399,20 @@ let walkTime = 0;
 let legMeshes = [];
 
 // Terrain constants
-const WORLD_SIZE = 200;
+const WORLD_SIZE = 900;          // total terrain plane size
+const NEAR_WATER_WIDTH = 200;    // shoreline water detail mesh width
 const WATER_LEVEL = -0.3;
+
+// Zone layout (map split along Z axis):
+//   Farm zone:  z >  FARM_SOUTH_EDGE       (existing playable area + beach)
+//   Road zone:  ROAD_SOUTH_EDGE < z < FARM_SOUTH_EDGE  (empty Wild West outskirts)
+//   City zone:  CITY_SOUTH_EDGE < z < ROAD_SOUTH_EDGE  (Wild West town)
+const FARM_SOUTH_EDGE = -90;
+const ROAD_SOUTH_EDGE = -240;
+const CITY_SOUTH_EDGE = -390;
+const ROAD_HALF_WIDTH = 6;
+const CITY_CENTER_Z = -310;
+const SIDE_EDGE = 90; // |x| beyond this = side cliffs (kanion walls)
 
 // Beach has a natural curved shoreline instead of a straight line
 function beachStartZ(x) {
@@ -409,6 +422,10 @@ function waterStartZ(x) {
   return beachStartZ(x) + 18;
 }
 const WATER_DEEP_Z = 200; // can swim far out into the ocean
+
+function inRoadCorridor(x, z) {
+  return z < FARM_SOUTH_EDGE - 5 && z > CITY_SOUTH_EDGE + 5 && Math.abs(x) < ROAD_HALF_WIDTH + 3;
+}
 
 // Farm location
 const FARM_X = -45;
@@ -441,15 +458,14 @@ function pseudoNoise(x, z) {
 
 function cliffHeight(x, z) {
   // Natural-looking cliff at edges using noise for irregularity
-  const edgeDist = 90;
   const cliffWidth = 15;
   const cliffMax = 12; // cliff height
   let cliff = 0;
   const noiseOffset = Math.sin(z * 0.15) * 3 + Math.sin(x * 0.12 + 1.5) * 2;
-  const leftDist = -x - (edgeDist + noiseOffset * 0.3);
-  const rightDist = x - (edgeDist + noiseOffset * 0.3);
+  const leftDist = -x - (SIDE_EDGE + noiseOffset * 0.3);
+  const rightDist = x - (SIDE_EDGE + noiseOffset * 0.3);
   const backNoiseOffset = Math.sin(x * 0.13) * 3 + Math.sin(x * 0.07 + 2.1) * 2;
-  const backDist = -z - (edgeDist + backNoiseOffset * 0.3);
+  const backDist = -z - (-CITY_SOUTH_EDGE + backNoiseOffset * 0.3);
 
   for (const d of [leftDist, rightDist, backDist]) {
     if (d > 0) {
@@ -483,19 +499,26 @@ function getTerrainHeight(x, z) {
     return Math.max(hillHeight, 0);
   }
 
-  // Check if we're beyond the playable area (cliff zone or beyond)
-  const edgeDist = 90;
-  const beyondEdge = Math.max(-x - edgeDist, x - edgeDist, -z - edgeDist, 0);
+  // Per-side beyond-playable distances (side cliffs at |x|=SIDE_EDGE, south at CITY_SOUTH_EDGE)
+  const leftBeyond  = -x - SIDE_EDGE;
+  const rightBeyond =  x - SIDE_EDGE;
+  const backBeyond  = -z - (-CITY_SOUTH_EDGE);
+  const beyondEdge = Math.max(leftBeyond, rightBeyond, backBeyond, 0);
   if (beyondEdge > 20) {
-    // Fully on the plateau
     return getExtendedHeight(x, z);
   } else if (beyondEdge > 0) {
-    // Transition: cliff rising then blending into plateau
     const base = Math.max(pseudoNoise(x, z), -0.2);
     const cliff = cliffHeight(x, z);
     const plateau = getExtendedHeight(x, z);
     const blendT = Math.min((beyondEdge - 0) / 20, 1);
     return base + cliff * (1 - blendT) + plateau * blendT;
+  }
+
+  // Road corridor — flat ground, blends with surrounding terrain at edges
+  if (z < FARM_SOUTH_EDGE && Math.abs(x) < ROAD_HALF_WIDTH + 4) {
+    const edgeT = Math.max(0, Math.min(1, (Math.abs(x) - ROAD_HALF_WIDTH) / 4));
+    const base = Math.max(pseudoNoise(x, z), -0.2);
+    return base * edgeT + cliffHeight(x, z);
   }
 
   // Normal playable area: rolling hills
@@ -526,9 +549,9 @@ function initScene() {
   const skyTexture = new THREE.CanvasTexture(skyCanvas);
   skyTexture.magFilter = THREE.LinearFilter;
   scene.background = skyTexture;
-  scene.fog = new THREE.Fog(0xdde8ee, 80, 280);
+  scene.fog = new THREE.Fog(0xdde8ee, 120, 480);
 
-  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 900);
   camera.position.set(0, 8, 12);
 
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -579,6 +602,7 @@ function initScene() {
     const x = (Math.random() - 0.5) * 140;
     const z = -Math.abs((Math.random() - 0.5) * 120);
     if (z > beachStartZ(x) - 5) continue;
+    if (inRoadCorridor(x, z)) continue;
     const key = Math.random() > 0.5 ? 'flowers' : 'plant_1';
     // Flowers ~0.3m (model 0.61→0.49), Plants ~0.4m
     const veg = cloneModel(key, 0.5 + Math.random() * 0.3);
@@ -595,6 +619,7 @@ function initScene() {
     const x = (Math.random() - 0.5) * 140;
     const z = (Math.random() - 0.5) * 130;
     if (z > beachStartZ(x) - 3) continue;
+    if (inRoadCorridor(x, z)) continue;
     const key = Math.random() > 0.5 ? 'rock_1' : 'rock_2';
     // Rocks ~0.3-0.5m
     const rock = cloneModel(key, 0.7 + Math.random() * 0.3);
@@ -611,6 +636,7 @@ function initScene() {
     const x = (Math.random() - 0.5) * 130;
     const z = (Math.random() - 0.5) * 120;
     if (z > beachStartZ(x) - 8) continue;
+    if (inRoadCorridor(x, z)) continue;
     const key = Math.random() > 0.5 ? 'bush_1' : 'bush_2';
     // Bush ~1m (model 1.69→0.59)
     const bush = cloneModel(key, 0.59 + Math.random() * 0.2);
@@ -642,12 +668,17 @@ function initScene() {
     const z = (Math.random() - 0.5) * 140;
     if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
     if (z > beachStartZ(x) - 10) continue; // no trees on beach
+    if (inRoadCorridor(x, z)) continue;
     // Keep trees out of farm area
     const dfx = x - FARM_X, dfz = z - FARM_Z;
     if (Math.sqrt(dfx * dfx + dfz * dfz) < FARM_RADIUS + 5) continue;
     treePositions.push({ x, z });
     createTree(x, z);
   }
+
+  // South zones — Wild West outskirts & town
+  createSouthlands();
+  createWildWestTown();
 }
 
 function brightenModel(model, factor = 2.0) {
@@ -713,9 +744,9 @@ function createTree(x, z) {
 }
 
 function createTerrain() {
-  // Extended terrain — 500x500 so it fills the view beyond cliffs
-  const terrainSize = 500;
-  const segments = 150;
+  // Extended terrain — covers farm + road + city zones beyond cliffs
+  const terrainSize = WORLD_SIZE;
+  const segments = 260;
   const geo = new THREE.PlaneGeometry(terrainSize, terrainSize, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
@@ -747,11 +778,13 @@ function createTerrain() {
       const t = (z - (bsz - 10)) / 10;
       color = grassColor.clone().lerp(sandColor, t);
     } else {
-      // Check if beyond playable area (plateau)
-      const edgeDist2 = 90;
-      const beyondEdge2 = Math.max(-x - edgeDist2, x - edgeDist2, -z - edgeDist2, 0);
+      // Per-side beyond detection (matches getTerrainHeight)
+      const leftBeyond2  = -x - SIDE_EDGE;
+      const rightBeyond2 =  x - SIDE_EDGE;
+      const backBeyond2  = -z - (-CITY_SOUTH_EDGE);
+      const beyondEdge2 = Math.max(leftBeyond2, rightBeyond2, backBeyond2, 0);
       if (beyondEdge2 > 15) {
-        // Plateau — darker, wilder green
+        // Plateau beyond cliffs — darker, wilder green
         color = new THREE.Color(0x2e6a25);
         color.offsetHSL(Math.random() * 0.03 - 0.015, 0, Math.random() * 0.04 - 0.02);
       } else if (beyondEdge2 > 0) {
@@ -759,16 +792,31 @@ function createTerrain() {
         const cliffT = beyondEdge2 / 15;
         color = grassColor.clone().lerp(new THREE.Color(0x7a7060), cliffT * 0.7);
       } else {
-        // Normal grass + farm dirt
-        const dfx = x - FARM_X, dfz = z - FARM_Z;
-        const farmDist = Math.sqrt(dfx * dfx + dfz * dfz);
-        if (farmDist < FARM_RADIUS) {
-          const farmT = 1 - farmDist / FARM_RADIUS;
-          color = grassColor.clone().lerp(new THREE.Color(0x8B7355), farmT * 0.6);
+        // Dry tint toward south (Wild West)
+        const dryT = z < FARM_SOUTH_EDGE
+          ? Math.min(1, (FARM_SOUTH_EDGE - z) / (FARM_SOUTH_EDGE - CITY_SOUTH_EDGE))
+          : 0;
+        const dryGround = new THREE.Color(0xa89060);
+        const baseGround = grassColor.clone().lerp(dryGround, Math.min(dryT * 0.7, 0.7));
+
+        // Road corridor — sandy dirt path
+        if (z < FARM_SOUTH_EDGE - 2 && Math.abs(x) < ROAD_HALF_WIDTH + 2) {
+          const roadT = Math.max(0, 1 - Math.max(0, Math.abs(x) - ROAD_HALF_WIDTH) / 2);
+          const roadColor = new THREE.Color(0xc2a878);
+          color = baseGround.clone().lerp(roadColor, roadT);
+          color.offsetHSL(0, 0, Math.random() * 0.04 - 0.02);
         } else {
-          color = grassColor.clone();
+          // Farm dirt blend
+          const dfx = x - FARM_X, dfz = z - FARM_Z;
+          const farmDist = Math.sqrt(dfx * dfx + dfz * dfz);
+          if (farmDist < FARM_RADIUS) {
+            const farmT = 1 - farmDist / FARM_RADIUS;
+            color = baseGround.clone().lerp(new THREE.Color(0x8B7355), farmT * 0.6);
+          } else {
+            color = baseGround;
+          }
+          color.offsetHSL(Math.random() * 0.02 - 0.01, 0, Math.random() * 0.05 - 0.025);
         }
-        color.offsetHSL(Math.random() * 0.02 - 0.01, 0, Math.random() * 0.05 - 0.025);
       }
     }
 
@@ -830,7 +878,7 @@ let waterMesh;
 function createWater() {
   // Near-shore water (detailed, follows curved shoreline)
   const segs = 40;
-  const nearGeo = new THREE.PlaneGeometry(WORLD_SIZE, 60, segs, segs);
+  const nearGeo = new THREE.PlaneGeometry(NEAR_WATER_WIDTH, 60, segs, segs);
   nearGeo.rotateX(-Math.PI / 2);
   const positions = nearGeo.attributes.position.array;
   for (let i = 0; i < positions.length; i += 3) {
@@ -940,6 +988,949 @@ function createPalmTree(x, baseY, z) {
     brightenModel(palm, 2.0);
     scene.add(palm);
   }
+}
+
+// ========== SOUTHLANDS: Wild West outskirts (cacti, tumbleweed, rocks) ==========
+let tumbleweeds = [];
+function createSouthlands() {
+  // Cacti scattered through the road zone
+  const cactusMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3a, roughness: 0.9 });
+  for (let i = 0; i < 40; i++) {
+    const x = (Math.random() - 0.5) * 160;
+    const z = FARM_SOUTH_EDGE - 5 - Math.random() * (FARM_SOUTH_EDGE - CITY_SOUTH_EDGE - 20);
+    // Skip road corridor and side cliff zones
+    if (Math.abs(x) < ROAD_HALF_WIDTH + 3) continue;
+    if (Math.abs(x) > SIDE_EDGE - 5) continue;
+    const h = getTerrainHeight(x, z);
+    if (h > 4) continue;
+    const cactus = new THREE.Group();
+    const trunkH = 1.5 + Math.random() * 1.5;
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.25, 0.3, trunkH, 8),
+      cactusMat
+    );
+    trunk.position.y = trunkH / 2;
+    trunk.castShadow = true;
+    cactus.add(trunk);
+    // 1-2 arms
+    const armCount = 1 + Math.floor(Math.random() * 2);
+    for (let a = 0; a < armCount; a++) {
+      const armLen = 0.7 + Math.random() * 0.5;
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, armLen, 8),
+        cactusMat
+      );
+      const side = a === 0 ? 1 : -1;
+      arm.position.set(side * 0.32, trunkH * 0.55, 0);
+      arm.rotation.z = side * Math.PI / 2;
+      cactus.add(arm);
+      const armUp = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 0.5, 8),
+        cactusMat
+      );
+      armUp.position.set(side * (0.32 + armLen / 2), trunkH * 0.55 + 0.25, 0);
+      cactus.add(armUp);
+    }
+    cactus.position.set(x, h, z);
+    cactus.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(cactus);
+  }
+
+  // Sun-bleached rocks
+  for (let i = 0; i < 25; i++) {
+    const x = (Math.random() - 0.5) * 160;
+    const z = FARM_SOUTH_EDGE - 5 - Math.random() * (FARM_SOUTH_EDGE - CITY_SOUTH_EDGE - 20);
+    if (Math.abs(x) < ROAD_HALF_WIDTH + 2) continue;
+    if (Math.abs(x) > SIDE_EDGE - 3) continue;
+    const h = getTerrainHeight(x, z);
+    if (h > 4) continue;
+    const size = 0.4 + Math.random() * 0.8;
+    const rock = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(size, 0),
+      new THREE.MeshLambertMaterial({
+        color: new THREE.Color().setHSL(0.08, 0.15, 0.45 + Math.random() * 0.15)
+      })
+    );
+    rock.position.set(x, h + size * 0.3, z);
+    rock.rotation.set(Math.random() * 2, Math.random() * 2, Math.random() * 2);
+    rock.castShadow = true;
+    scene.add(rock);
+  }
+
+  // Tumbleweeds — animated rolling balls
+  const twMat = new THREE.MeshStandardMaterial({ color: 0x8a6038, roughness: 1.0, wireframe: true });
+  for (let i = 0; i < 6; i++) {
+    const tw = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.55, 1),
+      twMat
+    );
+    const startZ = FARM_SOUTH_EDGE - 10 - Math.random() * (FARM_SOUTH_EDGE - CITY_SOUTH_EDGE - 30);
+    const startX = (Math.random() - 0.5) * (SIDE_EDGE - 10) * 2;
+    tw.position.set(startX, getTerrainHeight(startX, startZ) + 0.55, startZ);
+    tw.castShadow = true;
+    scene.add(tw);
+    tumbleweeds.push({
+      mesh: tw,
+      vx: (Math.random() - 0.5) * 1.5,
+      vz: 0.6 + Math.random() * 1.2,
+      spin: Math.random() * 3,
+    });
+  }
+}
+
+function animateTumbleweeds(dt) {
+  for (const tw of tumbleweeds) {
+    tw.mesh.position.x += tw.vx * dt;
+    tw.mesh.position.z += tw.vz * dt;
+    tw.mesh.rotation.x += tw.spin * dt;
+    tw.mesh.rotation.z += tw.spin * 0.7 * dt;
+    // Wrap when crossing zone, restart from top
+    if (tw.mesh.position.z > FARM_SOUTH_EDGE - 5 || tw.mesh.position.z < CITY_SOUTH_EDGE + 10
+        || Math.abs(tw.mesh.position.x) > SIDE_EDGE - 5) {
+      tw.mesh.position.x = (Math.random() - 0.5) * (SIDE_EDGE - 15) * 2;
+      tw.mesh.position.z = FARM_SOUTH_EDGE - 10;
+      tw.vx = (Math.random() - 0.5) * 1.5;
+      tw.vz = 0.6 + Math.random() * 1.2;
+    }
+    const h = getTerrainHeight(tw.mesh.position.x, tw.mesh.position.z);
+    tw.mesh.position.y = h + 0.55;
+  }
+}
+
+// ========== WILD WEST TOWN ==========
+// Street runs along Z axis. Buildings line both sides, fronts facing road.
+// `side`: -1 = west side (building front faces +X), +1 = east side (front faces -X)
+function createWildWestTown() {
+  const cz = CITY_CENTER_Z;
+  const WEST_X = -16;
+  const EAST_X = 16;
+
+  // West side
+  buildSaloon(WEST_X, cz + 14, -1);
+  buildStore(WEST_X, cz - 4, -1);
+  buildBank(WEST_X, cz - 22, -1);
+
+  // East side
+  buildSheriff(EAST_X, cz + 16, 1);
+  buildPost(EAST_X, cz - 2, 1);
+  buildBlacksmith(EAST_X, cz - 20, 1);
+
+  // Water tower behind saloon
+  buildWaterTower(-30, cz + 10);
+
+  // Hitching posts along road
+  buildHitchingPost(-9, cz + 16);
+  buildHitchingPost(-9, cz - 6);
+  buildHitchingPost(9, cz + 6);
+  buildHitchingPost(9, cz - 14);
+
+  // Wagon wheels
+  buildWagonWheel(-9, cz + 22);
+  buildWagonWheel(9, cz - 26);
+
+  // Barrels
+  for (const [bx, bz] of [[-10, cz + 12], [-10, cz - 1], [10, cz + 2], [10, cz - 11]]) {
+    buildBarrel(bx, bz);
+  }
+
+  // Townspeople — pickable like farmer
+  // Use createTownsperson(x, z, faceAngle, type)
+  createTownsperson(-8, cz + 14, Math.PI / 2, 'shopkeeper');     // outside saloon
+  createTownsperson(8, cz + 16, -Math.PI / 2, 'sheriff');        // outside sheriff
+  createTownsperson(-8, cz - 4, Math.PI / 2, 'merchant');        // outside store
+  createTownsperson(0, cz + 5, Math.PI, 'kid');                  // middle of street
+  createTownsperson(0, cz - 10, 0, 'kid');                       // middle of street
+  createTownsperson(8, cz - 20, -Math.PI / 2, 'blacksmith');     // outside forge
+  createTownsperson(-8, cz - 22, Math.PI / 2, 'banker');         // outside bank
+}
+
+// Common materials/helpers
+function _mat(color, roughness = 0.9, metalness = 0) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+function _signTexture(label, bgColor = '#3a1d08', fgColor = '#f6d990', font = 'bold 72px Georgia, serif') {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, 512, 128);
+  ctx.strokeStyle = fgColor;
+  ctx.lineWidth = 6;
+  ctx.strokeRect(8, 8, 512 - 16, 128 - 16);
+  ctx.fillStyle = fgColor;
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 256, 70);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Wraps a building group: applies world position + rotation toward road, registers collider.
+// side = -1 (west, faces +X) or +1 (east, faces -X)
+function _placeBuilding(group, x, z, side, w, d) {
+  const h = getTerrainHeight(x, z);
+  group.position.set(x, h, z);
+  // Local front (+Z) → world +X (west building) or world -X (east building).
+  // Rotation Y by +PI/2 maps local +Z to world +X.
+  group.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
+  scene.add(group);
+  // Collider in world space: after rotation Y by ±90°, X and Z swap.
+  // World half-extent along X = d/2 + porch (~1.6), along Z = w/2.
+  const halfWorldX = d / 2 + 0.4;
+  const halfWorldZ = w / 2 + 0.3;
+  barnColliders.push({
+    minX: x - halfWorldX, maxX: x + halfWorldX,
+    minZ: z - halfWorldZ, maxZ: z + halfWorldZ,
+  });
+}
+
+// Plank striped wall decoration (horizontal stripes) on front side (+Z local)
+function _addPlankStripes(group, w, d, hgt, trimMat) {
+  for (let py = 0.5; py < hgt; py += 0.6) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, 0.04, 0.04), trimMat);
+    plank.position.set(0, py, d / 2 + 0.02);
+    group.add(plank);
+  }
+}
+
+function _addRoof(group, w, d, hgt, roofMat) {
+  // Triangular gable roof (extruded triangle)
+  const shape = new THREE.Shape();
+  shape.moveTo(-w / 2 - 0.2, 0);
+  shape.lineTo(w / 2 + 0.2, 0);
+  shape.lineTo(0, w * 0.35);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: d + 1.6, bevelEnabled: false });
+  geo.translate(0, 0, -(d / 2 + 0.8));
+  const roof = new THREE.Mesh(geo, roofMat);
+  roof.position.y = hgt;
+  roof.castShadow = true;
+  group.add(roof);
+}
+
+function _addFalseFront(group, w, d, hgt, wallMat, label, signColors = {}) {
+  const facadeH = hgt * 1.45;
+  const facade = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, facadeH, 0.35), wallMat);
+  facade.position.set(0, facadeH / 2, d / 2 + 0.18);
+  facade.castShadow = true;
+  group.add(facade);
+  // Sign
+  const tex = _signTexture(label, signColors.bg, signColors.fg, signColors.font);
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(Math.min(w * 0.8, 6.5), 1.05),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  sign.position.set(0, hgt * 1.05, d / 2 + 0.37);
+  group.add(sign);
+}
+
+function _addPorch(group, w, d, hgt, roofMat, trimMat) {
+  // Porch overhang
+  const porch = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.15, 2.0), roofMat);
+  porch.position.set(0, hgt * 0.72, d / 2 + 1.0);
+  porch.castShadow = true;
+  group.add(porch);
+  // Pillars
+  for (const px of [-w / 2 + 0.4, w / 2 - 0.4]) {
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.09, hgt * 0.72, 6),
+      trimMat
+    );
+    pillar.position.set(px, hgt * 0.36, d / 2 + 1.95);
+    group.add(pillar);
+  }
+  // Porch floor planks
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 2.0), trimMat);
+  floor.position.set(0, 0.05, d / 2 + 1.0);
+  group.add(floor);
+}
+
+function _addDoor(group, w, d, hgt, color = 0x2a1808) {
+  const door = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.3, 2.1),
+    _mat(color, 0.95)
+  );
+  door.position.set(0, 1.05, d / 2 + 0.19);
+  group.add(door);
+  // Knob
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), _mat(0xddaa44, 0.4, 0.5));
+  knob.position.set(0.45, 1.0, d / 2 + 0.2);
+  group.add(knob);
+}
+
+function _addWindow(group, x, y, d, w_, h_) {
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(w_ + 0.1, h_ + 0.1),
+    _mat(0x3a2208, 0.9)
+  );
+  frame.position.set(x, y, d / 2 + 0.17);
+  group.add(frame);
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(w_, h_),
+    new THREE.MeshStandardMaterial({ color: 0xb8d4e0, roughness: 0.15, metalness: 0.5 })
+  );
+  glass.position.set(x, y, d / 2 + 0.19);
+  group.add(glass);
+  // Cross frame
+  const v = new THREE.Mesh(new THREE.BoxGeometry(0.04, h_, 0.05), _mat(0x3a2208));
+  v.position.set(x, y, d / 2 + 0.2);
+  group.add(v);
+  const hor = new THREE.Mesh(new THREE.BoxGeometry(w_, 0.04, 0.05), _mat(0x3a2208));
+  hor.position.set(x, y, d / 2 + 0.2);
+  group.add(hor);
+}
+
+// ----- SALOON: false-front, batwing doors, balcony, big sign -----
+function buildSaloon(x, z, side) {
+  const w = 11, d = 7, hgt = 4.8;
+  const group = new THREE.Group();
+  const wallMat = _mat(0xb18664, 0.95);
+  const roofMat = _mat(0x5a3a1f, 0.85);
+  const trimMat = _mat(0x3a2208, 0.9);
+
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), wallMat);
+  wall.position.y = hgt / 2;
+  wall.castShadow = true; wall.receiveShadow = true;
+  group.add(wall);
+
+  _addPlankStripes(group, w, d, hgt, trimMat);
+  _addRoof(group, w, d, hgt, roofMat);
+  _addFalseFront(group, w, d, hgt, wallMat, 'SALOON', { bg: '#7a2218', fg: '#f6d990' });
+  _addPorch(group, w, d, hgt, roofMat, trimMat);
+
+  // Balcony above porch (Wild West classic)
+  const balcony = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, 2.0), trimMat);
+  balcony.position.set(0, hgt * 0.78, d / 2 + 1.0);
+  group.add(balcony);
+  // Balcony railing
+  for (let bx = -w / 2 + 0.3; bx <= w / 2 - 0.3; bx += 0.4) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.06), trimMat);
+    post.position.set(bx, hgt * 0.78 + 0.25, d / 2 + 1.95);
+    group.add(post);
+  }
+  const topRail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, 0.08), trimMat);
+  topRail.position.set(0, hgt * 0.78 + 0.5, d / 2 + 1.95);
+  group.add(topRail);
+
+  // Batwing doors (two half-doors with gap on top and bottom)
+  for (const dx of [-0.35, 0.35]) {
+    const wing = new THREE.Mesh(
+      new THREE.BoxGeometry(0.65, 1.1, 0.06),
+      _mat(0x6a3a1a, 0.9)
+    );
+    wing.position.set(dx, 1.2, d / 2 + 0.21);
+    group.add(wing);
+  }
+  // Doorframe arch above
+  const arch = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.18, 0.1), trimMat);
+  arch.position.set(0, 2.05, d / 2 + 0.22);
+  group.add(arch);
+
+  // Side windows (upper floor)
+  _addWindow(group, -w / 3, 3.5, d, 1.0, 0.8);
+  _addWindow(group,  w / 3, 3.5, d, 1.0, 0.8);
+  // Bottom-floor windows
+  _addWindow(group, -w / 3 - 0.5, 1.4, d, 0.9, 0.7);
+  _addWindow(group,  w / 3 + 0.5, 1.4, d, 0.9, 0.7);
+
+  _placeBuilding(group, x, z, side, w, d);
+}
+
+// ----- SHERIFF: small, iron-barred window, big star, jail look -----
+function buildSheriff(x, z, side) {
+  const w = 6.5, d = 5.5, hgt = 3.6;
+  const group = new THREE.Group();
+  const wallMat = _mat(0xa68a6a, 0.95);
+  const roofMat = _mat(0x4a2c14, 0.85);
+  const trimMat = _mat(0x3a2208, 0.9);
+
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), wallMat);
+  wall.position.y = hgt / 2;
+  wall.castShadow = true; wall.receiveShadow = true;
+  group.add(wall);
+
+  _addPlankStripes(group, w, d, hgt, trimMat);
+  _addRoof(group, w, d, hgt, roofMat);
+  _addFalseFront(group, w, d, hgt, wallMat, 'SZERYF', { bg: '#2a1808', fg: '#f0d040' });
+  _addPorch(group, w, d, hgt, roofMat, trimMat);
+  _addDoor(group, w, d, hgt, 0x2a1808);
+
+  // Big sheriff star on facade
+  const starMat = _mat(0xf0d040, 0.3, 0.7);
+  starMat.emissive = new THREE.Color(0x553300);
+  starMat.emissiveIntensity = 0.6;
+  // 5-pointed star using custom shape
+  const starShape = new THREE.Shape();
+  const points = 5;
+  const outer = 0.55, inner = 0.22;
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+    if (i === 0) starShape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    else starShape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  const starGeo = new THREE.ShapeGeometry(starShape);
+  const star = new THREE.Mesh(starGeo, starMat);
+  star.position.set(0, hgt * 1.55, d / 2 + 0.4);
+  group.add(star);
+
+  // Jail-bar window on right side of front
+  _addWindow(group, w / 3, 2.0, d, 1.0, 0.9);
+  // Vertical iron bars over right window
+  for (let bx = -0.4; bx <= 0.4; bx += 0.2) {
+    const bar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, 0.95, 6),
+      _mat(0x404040, 0.5, 0.7)
+    );
+    bar.position.set(w / 3 + bx, 2.0, d / 2 + 0.22);
+    group.add(bar);
+  }
+  // Normal window on left
+  _addWindow(group, -w / 3, 2.0, d, 0.9, 0.7);
+
+  _placeBuilding(group, x, z, side, w, d);
+}
+
+// ----- BANK: stone columns, heavy door, vault feel -----
+function buildBank(x, z, side) {
+  const w = 8, d = 6, hgt = 4.5;
+  const group = new THREE.Group();
+  const stoneMat = _mat(0xc8b89c, 0.95);
+  const roofMat = _mat(0x4a4438, 0.85);
+  const trimMat = _mat(0x6a5040, 0.9);
+  const wallMat = _mat(0xb5a48a, 0.95);
+
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), wallMat);
+  wall.position.y = hgt / 2;
+  wall.castShadow = true; wall.receiveShadow = true;
+  group.add(wall);
+
+  // Stone block lines (horizontal grout)
+  for (let py = 0.6; py < hgt; py += 0.7) {
+    const groutLine = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, 0.05, 0.05), trimMat);
+    groutLine.position.set(0, py, d / 2 + 0.02);
+    group.add(groutLine);
+  }
+
+  _addRoof(group, w, d, hgt, roofMat);
+
+  // Pediment (Greek-temple style triangle above columns) — false front but triangular
+  const pedimentShape = new THREE.Shape();
+  pedimentShape.moveTo(-w / 2 - 0.3, 0);
+  pedimentShape.lineTo(w / 2 + 0.3, 0);
+  pedimentShape.lineTo(0, 1.2);
+  pedimentShape.closePath();
+  const pedGeo = new THREE.ExtrudeGeometry(pedimentShape, { depth: 0.3, bevelEnabled: false });
+  const pediment = new THREE.Mesh(pedGeo, stoneMat);
+  pediment.position.set(0, hgt, d / 2 + 0.05);
+  group.add(pediment);
+
+  // BANK sign on pediment
+  const tex = _signTexture('BANK', '#2a2018', '#e8c870', 'bold 84px Georgia, serif');
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.5, 0.9),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  sign.position.set(0, hgt + 0.5, d / 2 + 0.36);
+  group.add(sign);
+
+  // Two front columns (Greek style)
+  for (const cx of [-w / 3 + 0.2, w / 3 - 0.2]) {
+    const colBase = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.6), stoneMat);
+    colBase.position.set(cx, 0.1, d / 2 + 0.8);
+    group.add(colBase);
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, hgt - 0.4, 12), stoneMat);
+    col.position.set(cx, hgt / 2 + 0.1, d / 2 + 0.8);
+    group.add(col);
+    const colTop = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.6), stoneMat);
+    colTop.position.set(cx, hgt - 0.1, d / 2 + 0.8);
+    group.add(colTop);
+  }
+
+  // Heavy door (taller, dark)
+  const door = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.4, 2.4),
+    _mat(0x1a1008, 0.9, 0.2)
+  );
+  door.position.set(0, 1.2, d / 2 + 0.16);
+  group.add(door);
+  // Vault wheel handle (circle)
+  const handle = new THREE.Mesh(
+    new THREE.TorusGeometry(0.18, 0.04, 6, 16),
+    _mat(0x999999, 0.4, 0.7)
+  );
+  handle.position.set(0, 1.4, d / 2 + 0.18);
+  group.add(handle);
+  for (let r = 0; r < 6; r++) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.04), _mat(0x999999, 0.4, 0.7));
+    spoke.rotation.z = (r / 6) * Math.PI * 2;
+    spoke.position.set(0, 1.4, d / 2 + 0.18);
+    group.add(spoke);
+  }
+
+  // Symmetric small windows with bars
+  for (const wx of [-w / 2 + 0.7, w / 2 - 0.7]) {
+    _addWindow(group, wx, 2.4, d, 0.6, 0.8);
+    for (let bx = -0.2; bx <= 0.2; bx += 0.2) {
+      const bar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, 0.85, 6),
+        _mat(0x303030, 0.4, 0.6)
+      );
+      bar.position.set(wx + bx, 2.4, d / 2 + 0.22);
+      group.add(bar);
+    }
+  }
+
+  // Stack of money bags outside front (decoration)
+  for (const [bx, by] of [[-w / 4, 0.2], [-w / 4 + 0.3, 0.2], [-w / 4 + 0.15, 0.55]]) {
+    const bag = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 8, 8),
+      _mat(0xd4c590, 0.95)
+    );
+    bag.position.set(bx, by, d / 2 + 1.5);
+    bag.scale.y = 0.85;
+    group.add(bag);
+    // $ on bag
+    const dollarCanvas = document.createElement('canvas');
+    dollarCanvas.width = 64; dollarCanvas.height = 64;
+    const dctx = dollarCanvas.getContext('2d');
+    dctx.fillStyle = '#553311';
+    dctx.font = 'bold 48px Arial';
+    dctx.textAlign = 'center';
+    dctx.textBaseline = 'middle';
+    dctx.fillText('$', 32, 36);
+    const dtex = new THREE.CanvasTexture(dollarCanvas);
+    dtex.colorSpace = THREE.SRGBColorSpace;
+    const dol = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.25, 0.25),
+      new THREE.MeshBasicMaterial({ map: dtex, transparent: true })
+    );
+    dol.position.set(bx, by, d / 2 + 1.73);
+    group.add(dol);
+  }
+
+  _placeBuilding(group, x, z, side, w, d);
+}
+
+// ----- STORE: big window display with goods, awning, barrels -----
+function buildStore(x, z, side) {
+  const w = 9, d = 6.5, hgt = 4.2;
+  const group = new THREE.Group();
+  const wallMat = _mat(0xc0a070, 0.95);
+  const roofMat = _mat(0x5a3a1f, 0.85);
+  const trimMat = _mat(0x3a2208, 0.9);
+  const awningMat = _mat(0xc8424a, 0.85); // red-white striped awning base
+
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), wallMat);
+  wall.position.y = hgt / 2;
+  wall.castShadow = true; wall.receiveShadow = true;
+  group.add(wall);
+
+  _addPlankStripes(group, w, d, hgt, trimMat);
+  _addRoof(group, w, d, hgt, roofMat);
+  _addFalseFront(group, w, d, hgt, wallMat, 'SKLEP', { bg: '#1a3a18', fg: '#f0e890' });
+  _addPorch(group, w, d, hgt, roofMat, trimMat);
+
+  // Wide window display (no glass cross — open showcase)
+  const display = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.6, 1.6),
+    new THREE.MeshStandardMaterial({ color: 0xeae0c8, roughness: 0.3, metalness: 0.3 })
+  );
+  display.position.set(0, 2.4, d / 2 + 0.19);
+  group.add(display);
+  // Window frame
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.6 + 0.15, 1.75),
+    trimMat
+  );
+  frame.position.set(0, 2.4, d / 2 + 0.17);
+  group.add(frame);
+
+  // Goods in window — colorful boxes
+  for (let i = 0; i < 5; i++) {
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.5 + Math.random() * 0.4, 0.4),
+      _mat([0xcc5544, 0x4488aa, 0xddaa44, 0x88aa44, 0xaa6688][i], 0.85)
+    );
+    box.position.set(-w * 0.27 + i * (w * 0.13), 1.95, d / 2 + 0.5);
+    group.add(box);
+  }
+  // Apple barrel on porch
+  const appleBarrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.45, 0.45, 0.9, 12),
+    _mat(0x6a4828, 0.95)
+  );
+  appleBarrel.position.set(w / 2 - 1.0, 0.45, d / 2 + 1.5);
+  group.add(appleBarrel);
+  // Apples on top
+  for (let i = 0; i < 5; i++) {
+    const apple = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 8, 6),
+      _mat(0xdd2222, 0.4)
+    );
+    const ang = (i / 5) * Math.PI * 2;
+    apple.position.set(w / 2 - 1.0 + Math.cos(ang) * 0.2, 0.95, d / 2 + 1.5 + Math.sin(ang) * 0.2);
+    group.add(apple);
+  }
+
+  // Door (offset to left for display window space)
+  const door = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.2, 2.1),
+    _mat(0x2a1808, 0.95)
+  );
+  door.position.set(-w / 3, 1.05, d / 2 + 0.19);
+  group.add(door);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), _mat(0xddaa44, 0.4, 0.5));
+  knob.position.set(-w / 3 + 0.45, 1.0, d / 2 + 0.2);
+  group.add(knob);
+
+  // Striped awning above display window (red panels)
+  for (let i = 0; i < 5; i++) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.13, 0.05, 0.6),
+      _mat(i % 2 === 0 ? 0xc8424a : 0xf0e8d0, 0.9)
+    );
+    stripe.position.set(-w * 0.27 + i * (w * 0.13), 3.3, d / 2 + 0.4);
+    stripe.rotation.x = -0.25;
+    group.add(stripe);
+  }
+
+  _placeBuilding(group, x, z, side, w, d);
+}
+
+// ----- POST OFFICE: small with mailbox out front, letter on facade -----
+function buildPost(x, z, side) {
+  const w = 6, d = 5, hgt = 3.6;
+  const group = new THREE.Group();
+  const wallMat = _mat(0xc8916a, 0.95);
+  const roofMat = _mat(0x4a2c14, 0.85);
+  const trimMat = _mat(0x3a2208, 0.9);
+
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), wallMat);
+  wall.position.y = hgt / 2;
+  wall.castShadow = true; wall.receiveShadow = true;
+  group.add(wall);
+
+  _addPlankStripes(group, w, d, hgt, trimMat);
+  _addRoof(group, w, d, hgt, roofMat);
+  _addFalseFront(group, w, d, hgt, wallMat, 'POCZTA', { bg: '#1a4488', fg: '#f6f0d0' });
+  _addPorch(group, w, d, hgt, roofMat, trimMat);
+  _addDoor(group, w, d, hgt);
+
+  // Letter symbol on facade above sign
+  const envCanvas = document.createElement('canvas');
+  envCanvas.width = 128; envCanvas.height = 96;
+  const ectx = envCanvas.getContext('2d');
+  ectx.fillStyle = '#f0e8d0';
+  ectx.fillRect(0, 0, 128, 96);
+  ectx.strokeStyle = '#3a2208';
+  ectx.lineWidth = 4;
+  ectx.strokeRect(2, 2, 124, 92);
+  ectx.beginPath();
+  ectx.moveTo(2, 2); ectx.lineTo(64, 50); ectx.lineTo(126, 2);
+  ectx.stroke();
+  const envTex = new THREE.CanvasTexture(envCanvas);
+  envTex.colorSpace = THREE.SRGBColorSpace;
+  const env = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.8, 0.6),
+    new THREE.MeshBasicMaterial({ map: envTex })
+  );
+  env.position.set(0, hgt * 0.55, d / 2 + 0.19);
+  group.add(env);
+
+  // Side window
+  _addWindow(group, w / 3, 2.0, d, 0.9, 0.8);
+  _addWindow(group, -w / 3, 2.0, d, 0.9, 0.8);
+
+  // Mailbox out front (blue post with red flag)
+  const post = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.08, 1.2, 8),
+    _mat(0x3a2208, 0.9)
+  );
+  post.position.set(w / 2 + 0.5, 0.6, d / 2 + 1.5);
+  group.add(post);
+  const mailbox = new THREE.Mesh(
+    new THREE.BoxGeometry(0.45, 0.35, 0.7),
+    _mat(0x2a5cc8, 0.85)
+  );
+  mailbox.position.set(w / 2 + 0.5, 1.35, d / 2 + 1.5);
+  group.add(mailbox);
+  // Curved top
+  const mbTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.225, 0.225, 0.7, 12, 1, false, 0, Math.PI),
+    _mat(0x2a5cc8, 0.85)
+  );
+  mbTop.rotation.z = Math.PI / 2;
+  mbTop.rotation.y = Math.PI / 2;
+  mbTop.position.set(w / 2 + 0.5, 1.525, d / 2 + 1.5);
+  group.add(mbTop);
+  // Red flag
+  const flag = new THREE.Mesh(
+    new THREE.BoxGeometry(0.04, 0.25, 0.15),
+    _mat(0xcc2222, 0.85)
+  );
+  flag.position.set(w / 2 + 0.7, 1.5, d / 2 + 1.5);
+  group.add(flag);
+
+  _placeBuilding(group, x, z, side, w, d);
+}
+
+// ----- BLACKSMITH: open shed, chimney, anvil, forge with glowing fire -----
+function buildBlacksmith(x, z, side) {
+  const w = 8, d = 6, hgt = 4;
+  const group = new THREE.Group();
+  const wallMat = _mat(0x6a5240, 0.95);
+  const roofMat = _mat(0x382418, 0.85);
+  const stoneMat = _mat(0x8a7060, 0.95);
+  const trimMat = _mat(0x3a2208, 0.9);
+
+  // Back + side walls only (open shed in front)
+  const backWall = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, 0.3), wallMat);
+  backWall.position.set(0, hgt / 2, -d / 2);
+  backWall.castShadow = true; backWall.receiveShadow = true;
+  group.add(backWall);
+  for (const sx of [-w / 2 + 0.15, w / 2 - 0.15]) {
+    const side_ = new THREE.Mesh(new THREE.BoxGeometry(0.3, hgt, d), wallMat);
+    side_.position.set(sx, hgt / 2, 0);
+    side_.castShadow = true;
+    group.add(side_);
+  }
+
+  // Sloped roof (low at front, high at back)
+  const roofShape = new THREE.Shape();
+  roofShape.moveTo(-w / 2 - 0.3, 0);
+  roofShape.lineTo(w / 2 + 0.3, 0);
+  roofShape.lineTo(w / 2 + 0.3, 0.15);
+  roofShape.lineTo(-w / 2 - 0.3, 0.15);
+  roofShape.closePath();
+  const roofGeo = new THREE.ExtrudeGeometry(roofShape, { depth: d + 1, bevelEnabled: false });
+  roofGeo.translate(0, 0, -(d / 2 + 0.5));
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.position.y = hgt;
+  roof.rotation.x = -0.25; // slope
+  roof.castShadow = true;
+  group.add(roof);
+
+  // Stone chimney on the back
+  const chimney = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, hgt + 2, 0.9),
+    stoneMat
+  );
+  chimney.position.set(-w / 3, (hgt + 2) / 2, -d / 2 - 0.3);
+  chimney.castShadow = true;
+  group.add(chimney);
+  // Smoke trickle (small white box top of chimney)
+  const smoke = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xe0d8d0, roughness: 0.95, transparent: true, opacity: 0.6 })
+  );
+  smoke.position.set(-w / 3, hgt + 2.6, -d / 2 - 0.3);
+  group.add(smoke);
+
+  // Sign on top edge of roof front
+  const tex = _signTexture('KOWAL', '#1a0a04', '#f6d990');
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.5, 0.9),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  sign.position.set(0, hgt + 0.5, d / 2 + 0.5);
+  group.add(sign);
+
+  // Anvil out front (cone-trapezoid shape)
+  const anvilGroup = new THREE.Group();
+  const anvilBase = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.45, 0.4),
+    _mat(0x2a2a2a, 0.6, 0.5)
+  );
+  anvilBase.position.y = 0.225;
+  anvilGroup.add(anvilBase);
+  const anvilTop = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 0.18, 0.35),
+    _mat(0x303030, 0.5, 0.6)
+  );
+  anvilTop.position.y = 0.54;
+  anvilGroup.add(anvilTop);
+  const anvilHorn = new THREE.Mesh(
+    new THREE.ConeGeometry(0.12, 0.55, 8),
+    _mat(0x303030, 0.5, 0.6)
+  );
+  anvilHorn.rotation.z = -Math.PI / 2;
+  anvilHorn.position.set(0.75, 0.54, 0);
+  anvilGroup.add(anvilHorn);
+  // Wood stump under anvil
+  const stump = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.4, 0.6, 10),
+    _mat(0x6a4828, 0.95)
+  );
+  stump.position.y = 0.3;
+  anvilGroup.add(stump);
+  anvilGroup.position.set(1.5, 0, d / 2 + 0.5);
+  group.add(anvilGroup);
+
+  // Forge — stone box with glowing orange interior
+  const forge = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 1.4, 1.2),
+    stoneMat
+  );
+  forge.position.set(-w / 3, 0.7, -d / 2 + 0.7);
+  group.add(forge);
+  // Glowing fire inside
+  const fire = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.2, 0.8),
+    new THREE.MeshBasicMaterial({ color: 0xff5500 })
+  );
+  fire.position.set(-w / 3, 0.8, -d / 2 + 1.31);
+  group.add(fire);
+  const fireLight = new THREE.PointLight(0xff7733, 1.5, 8);
+  fireLight.position.set(-w / 3, 1.0, -d / 2 + 1.3);
+  group.add(fireLight);
+
+  // Horseshoes hanging on right wall
+  for (let i = 0; i < 3; i++) {
+    const shoe = new THREE.Mesh(
+      new THREE.TorusGeometry(0.18, 0.04, 4, 12, Math.PI * 1.3),
+      _mat(0x404040, 0.5, 0.7)
+    );
+    shoe.position.set(w / 2 - 0.4, 2.2 - i * 0.5, 0);
+    shoe.rotation.y = Math.PI / 2;
+    group.add(shoe);
+  }
+
+  // Hammer on anvil
+  const hammerHead = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 0.35),
+    _mat(0x404040, 0.5, 0.6)
+  );
+  hammerHead.position.set(1.5, 0.85, d / 2 + 0.5);
+  group.add(hammerHead);
+  const hammerHandle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6),
+    _mat(0x6a4828, 0.95)
+  );
+  hammerHandle.position.set(1.5, 0.55, d / 2 + 0.7);
+  hammerHandle.rotation.x = Math.PI / 4;
+  group.add(hammerHandle);
+
+  _placeBuilding(group, x, z, side, w, d);
+}
+
+function buildWaterTower(x, z) {
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6238, roughness: 0.95 });
+  const darkWood = new THREE.MeshStandardMaterial({ color: 0x5a3a1f, roughness: 0.9 });
+
+  // 4 legs
+  for (const [lx, lz] of [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 5, 0.25), darkWood);
+    leg.position.set(lx, 2.5, lz);
+    leg.castShadow = true;
+    group.add(leg);
+  }
+  // Cross braces
+  for (const ly of [1.2, 3.2]) {
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 0.12), darkWood);
+    brace.position.set(0, ly, -1.4);
+    group.add(brace);
+    const brace2 = brace.clone();
+    brace2.position.z = 1.4;
+    group.add(brace2);
+    const sideB = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.2), darkWood);
+    sideB.position.set(-1.4, ly, 0);
+    group.add(sideB);
+    const sideB2 = sideB.clone();
+    sideB2.position.x = 1.4;
+    group.add(sideB2);
+  }
+  // Tank — cylinder
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 2.6, 16), woodMat);
+  tank.position.y = 6.3;
+  tank.castShadow = true;
+  group.add(tank);
+  // Bands
+  for (const by of [5.4, 6.3, 7.2]) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(1.72, 0.05, 4, 16), darkWood);
+    band.position.y = by;
+    band.rotation.x = Math.PI / 2;
+    group.add(band);
+  }
+  // Conical roof
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(1.9, 1.2, 16), darkWood);
+  roof.position.y = 8.2;
+  group.add(roof);
+
+  group.position.set(x, h, z);
+  scene.add(group);
+
+  // Collider around legs
+  barnColliders.push({
+    minX: x - 1.7, maxX: x + 1.7,
+    minZ: z - 1.7, maxZ: z + 1.7,
+  });
+}
+
+function buildHitchingPost(x, z) {
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1f, roughness: 0.95 });
+  // 2 posts
+  for (const px of [-1.5, 1.5]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.4, 8), woodMat);
+    post.position.set(px, 0.7, 0);
+    group.add(post);
+  }
+  // Horizontal rail
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.2, 8), woodMat);
+  rail.rotation.z = Math.PI / 2;
+  rail.position.set(0, 1.15, 0);
+  group.add(rail);
+  group.position.set(x, h, z);
+  scene.add(group);
+}
+
+function buildWagonWheel(x, z) {
+  const h = getTerrainHeight(x, z);
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6a4a28, roughness: 0.95 });
+  const group = new THREE.Group();
+  // Rim
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.06, 6, 20), woodMat);
+  group.add(rim);
+  // Hub
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.18, 8), woodMat);
+  hub.rotation.x = Math.PI / 2;
+  group.add(hub);
+  // Spokes
+  for (let s = 0; s < 6; s++) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.35, 0.06), woodMat);
+    spoke.rotation.z = (s / 6) * Math.PI * 2;
+    group.add(spoke);
+  }
+  group.rotation.x = -Math.PI / 2 + 0.15; // lean against ground
+  group.rotation.y = Math.random() * Math.PI;
+  group.position.set(x, h + 0.7, z);
+  scene.add(group);
+}
+
+function buildBarrel(x, z) {
+  const h = getTerrainHeight(x, z);
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6a4828, roughness: 0.95 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x3a2818, roughness: 0.9 });
+  const group = new THREE.Group();
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.0, 12), woodMat);
+  barrel.position.y = 0.5;
+  barrel.castShadow = true;
+  group.add(barrel);
+  for (const by of [0.15, 0.85]) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.04, 4, 12), bandMat);
+    band.position.y = by;
+    band.rotation.x = Math.PI / 2;
+    group.add(band);
+  }
+  group.position.set(x, h, z);
+  scene.add(group);
 }
 
 // ========== DALMATIAN WITH DOGHOUSE (near stable) ==========
@@ -1991,6 +2982,169 @@ function createFarmer(x, z) {
   farmers.push({ group, rightArmPivot, waving: false, waveTime: 0 });
 }
 
+// Townsperson — same pickup mechanic as farmer (added to `farmers` array).
+// `type`: 'sheriff' | 'shopkeeper' | 'merchant' | 'kid' | 'blacksmith' | 'banker'
+function createTownsperson(x, z, faceAngle, type) {
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  group.position.set(x, h, z);
+  group.rotation.y = angleToRotationY(faceAngle);
+
+  const S = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+  const skinColor = 0xe8b89a;
+
+  // Per-type config
+  const types = {
+    sheriff:    { shirt: 0x6a4828, hatColor: 0x3a2208, hatBig: true, accent: 0xf0d040, accentType: 'star', trousers: 0x4a3220 },
+    shopkeeper: { shirt: 0xe8d4a4, hatColor: 0x5a3a1f, hatBig: false, accent: 0xf0f0f0, accentType: 'apron', trousers: 0x554433 },
+    merchant:   { shirt: 0x336688, hatColor: 0x2a1a08, hatBig: false, accent: 0xb88838, accentType: 'vest', trousers: 0x3a2818 },
+    kid:        { shirt: [0xcc5544, 0x44aa66, 0xddaa44][Math.floor(Math.random() * 3)], hatColor: null, hatBig: false, accent: null, accentType: null, trousers: 0x5a4422, scale: 0.95 },
+    blacksmith: { shirt: 0x6a3a1a, hatColor: null, hatBig: false, accent: 0x4a3020, accentType: 'apron', trousers: 0x3a2008 },
+    banker:     { shirt: 0x1a1a2a, hatColor: 0x1a1a2a, hatBig: false, accent: 0xd0c08a, accentType: 'tie', trousers: 0x1a1a2a },
+  };
+  const T = types[type] || types.kid;
+  const personScale = T.scale || 1.0;
+
+  // Torso
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.6, 10), S(T.shirt));
+  torso.position.y = 1.1;
+  group.add(torso);
+
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), S(skinColor));
+  head.position.y = 1.55;
+  group.add(head);
+
+  // Face — eyes
+  for (const side of [-1, 1]) {
+    const eyeWhite = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), S(0xffffff));
+    eyeWhite.position.set(0.1, 1.58, side * 0.06);
+    group.add(eyeWhite);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), S(0x222222));
+    pupil.position.set(0.13, 1.58, side * 0.06);
+    group.add(pupil);
+  }
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 4), S(0xd4a080));
+  nose.position.set(0.14, 1.53, 0);
+  group.add(nose);
+  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 4, 8, Math.PI), S(0x993333));
+  smile.position.set(0.12, 1.48, 0);
+  smile.rotation.y = Math.PI / 2;
+  smile.rotation.z = Math.PI;
+  group.add(smile);
+
+  // Hat (if any)
+  if (T.hatColor !== null) {
+    const brimR = T.hatBig ? 0.28 : 0.22;
+    const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(brimR, brimR, 0.03, 12), S(T.hatColor));
+    hatBrim.position.y = 1.68;
+    group.add(hatBrim);
+    const hatTop = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, T.hatBig ? 0.18 : 0.15, 12), S(T.hatColor));
+    hatTop.position.y = T.hatBig ? 1.79 : 1.77;
+    group.add(hatTop);
+    // Sheriff hat band
+    if (type === 'sheriff') {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.156, 0.156, 0.04, 12), S(0xa88040));
+      band.position.y = 1.74;
+      group.add(band);
+    }
+  } else if (type === 'kid') {
+    // Tousled hair instead of hat
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), S(0x4a3018));
+    hair.position.y = 1.6;
+    hair.scale.y = 0.7;
+    group.add(hair);
+  } else if (type === 'blacksmith') {
+    // Bald top + dark headband
+    const headband = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.025, 4, 12), S(0x886040));
+    headband.position.y = 1.62;
+    headband.rotation.x = Math.PI / 2;
+    group.add(headband);
+  }
+
+  // Accent (star, apron, vest, tie)
+  if (T.accentType === 'star') {
+    // Sheriff star on chest
+    const starShape = new THREE.Shape();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 0.09 : 0.04;
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      if (i === 0) starShape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else starShape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    const starMat = S(T.accent);
+    starMat.emissive = new THREE.Color(0x553300);
+    starMat.emissiveIntensity = 0.5;
+    starMat.metalness = 0.6; starMat.roughness = 0.3;
+    const star = new THREE.Mesh(new THREE.ShapeGeometry(starShape), starMat);
+    star.position.set(0.22, 1.22, 0);
+    star.rotation.y = Math.PI / 2;
+    group.add(star);
+  } else if (T.accentType === 'apron') {
+    const apron = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.55, 0.4),
+      S(T.accent)
+    );
+    apron.position.set(0.2, 0.95, 0);
+    group.add(apron);
+  } else if (T.accentType === 'vest') {
+    // Brown vest panel
+    const vest = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.45, 0.36),
+      S(T.accent)
+    );
+    vest.position.set(0.21, 1.1, 0);
+    group.add(vest);
+    // Gold watch chain
+    const chain = new THREE.Mesh(
+      new THREE.TorusGeometry(0.05, 0.008, 4, 8, Math.PI),
+      S(0xddaa44)
+    );
+    chain.position.set(0.23, 1.0, 0.05);
+    chain.rotation.y = Math.PI / 2;
+    group.add(chain);
+  } else if (T.accentType === 'tie') {
+    const tie = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.35, 0.08),
+      S(T.accent)
+    );
+    tie.position.set(0.2, 1.2, 0);
+    group.add(tie);
+  }
+
+  // Legs
+  for (const side of [-0.08, 0.08]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.055, 0.6, 8), S(T.trousers));
+    leg.position.set(0, 0.5, side);
+    group.add(leg);
+    const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.08, 0.14, 8), S(0x3a2510));
+    boot.position.set(0, 0.17, side);
+    group.add(boot);
+  }
+
+  // Arms — right pivots for waving
+  const rightArmPivot = new THREE.Group();
+  rightArmPivot.position.set(0, 1.3, 0.26);
+  const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.45, 8), S(T.shirt));
+  rightArm.position.y = -0.22;
+  rightArmPivot.add(rightArm);
+  const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), S(skinColor));
+  rightHand.position.y = -0.45;
+  rightArmPivot.add(rightHand);
+  group.add(rightArmPivot);
+
+  const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.45, 8), S(T.shirt));
+  leftArm.position.set(0, 1.05, -0.26);
+  group.add(leftArm);
+  const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), S(skinColor));
+  leftHand.position.set(0, 0.82, -0.26);
+  group.add(leftHand);
+
+  group.scale.set(1.4 * personScale, 1.4 * personScale, 1.4 * personScale);
+  scene.add(group);
+  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0 });
+}
+
 let animalAnimTime = 0;
 
 function isInsideFarm(x, z) {
@@ -2657,12 +3811,13 @@ function drawMinimap() {
   if (!ctx) return;
   const W = 160, H = 160;
   const R = W / 2;
-  const MAP_RANGE = 100;
+  const MAP_RANGE = 250;
+  const CENTER_Z = -150; // shift so road+city visible in lower half
 
   function toMap(wx, wz) {
     return {
       x: (wx / MAP_RANGE * 0.5 + 0.5) * W,
-      y: (wz / MAP_RANGE * 0.5 + 0.5) * H,
+      y: ((wz - CENTER_Z) / MAP_RANGE * 0.5 + 0.5) * H,
     };
   }
 
@@ -2680,6 +3835,22 @@ function drawMinimap() {
   grassGrad.addColorStop(1, '#357028');
   ctx.fillStyle = grassGrad;
   ctx.fillRect(0, 0, W, H);
+
+  // Dry south zone (Wild West outskirts)
+  const southStart = toMap(0, FARM_SOUTH_EDGE).y;
+  const cityStart = toMap(0, ROAD_SOUTH_EDGE).y;
+  const cityEnd = toMap(0, CITY_SOUTH_EDGE).y;
+  ctx.fillStyle = '#a89060';
+  ctx.fillRect(0, southStart, W, cityEnd - southStart);
+  // City zone (slightly darker)
+  ctx.fillStyle = '#806848';
+  ctx.fillRect(0, cityStart, W, cityEnd - cityStart);
+
+  // Road corridor (sand strip)
+  const roadLeft = toMap(-ROAD_HALF_WIDTH, 0).x;
+  const roadRight = toMap(ROAD_HALF_WIDTH, 0).x;
+  ctx.fillStyle = '#d4b890';
+  ctx.fillRect(roadLeft, southStart, roadRight - roadLeft, cityEnd - southStart);
 
   // Farm area (soft brown circle)
   const fp = toMap(FARM_X, FARM_Z);
@@ -2703,6 +3874,14 @@ function drawMinimap() {
     ctx.fillRect(px, beachPx, 1, waterPx - beachPx);
     ctx.fillStyle = '#3098d0';
     ctx.fillRect(px, waterPx, 1, H - waterPx);
+  }
+
+  // City buildings markers
+  const cmp = toMap(0, CITY_CENTER_Z);
+  ctx.fillStyle = '#3a2208';
+  for (const [bx, bz] of [[-14, 10], [-12, -8], [-13, -22], [12, 14], [13, -4], [13, -18]]) {
+    const p = toMap(bx, CITY_CENTER_Z + bz);
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
   }
 
   // Trees (soft green dots)
@@ -2953,7 +4132,7 @@ function update() {
 
     // Keep within world bounds
     horsePos.x = THREE.MathUtils.clamp(horsePos.x, -95, 95);
-    horsePos.z = THREE.MathUtils.clamp(horsePos.z, -95, WATER_DEEP_Z - 1);
+    horsePos.z = THREE.MathUtils.clamp(horsePos.z, CITY_SOUTH_EDGE + 5, WATER_DEEP_Z - 1);
   }
 
   // Slow down in water
@@ -3066,6 +4245,7 @@ function update() {
   if (window.__waterFrame % 2 === 0) animateWater(clock.elapsedTime);
   animateClouds(dt);
   animateBirds(dt);
+  animateTumbleweeds(dt);
   updateCrab(dt);
   updateDalmatian(dt);
   updateCheetah(dt);
