@@ -360,6 +360,22 @@ const CARROT_PRICE = 1;
 const APPLE_PRICE = 2;
 let sellZone = null; // { minX, maxX, minZ, maxZ, cooldown, popup }
 let sellCooldown = 0;
+let buyCooldown = 0;
+
+// Shops — one item per Wild-West building, buyable when horse enters counter zone.
+const SHOP_ITEMS = {
+  napoj:   { emoji: '🥤', name: 'Napój',   key: 'KeyN', keyLabel: 'N', price: 3,  max: Infinity, building: 'saloon' },
+  siano:   { emoji: '🌾', name: 'Siano',   key: 'KeyS', keyLabel: 'S', price: 1,  max: Infinity, building: 'sklep' },
+  diament: { emoji: '💎', name: 'Diament', key: 'KeyD', keyLabel: 'D', price: 20, max: Infinity, building: 'bank' },
+  odznaka: { emoji: '⭐', name: 'Odznaka', key: 'KeyO', keyLabel: 'O', price: 12, max: Infinity, building: 'szeryf' },
+  list:    { emoji: '💌', name: 'List',    key: 'KeyL', keyLabel: 'L', price: 0,  max: 1,        building: 'poczta' },
+  podkowa: { emoji: '🧲', name: 'Podkowa', key: 'KeyP', keyLabel: 'P', price: 8, max: Infinity, building: 'kowal' },
+};
+let inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0 };
+
+// Registry of all counter zones (sell + buy). Each entry:
+//   { minX, maxX, minZ, maxZ, cx, cz, counterX, counterZ, beacon, kind, itemKey?, inZone }
+let interactionZones = [];
 let level = 1;
 let maxNumber = 5; // starts with 1-5, very slow progression for kindergarten
 let correctAnswers = 0;
@@ -1083,26 +1099,45 @@ function createSouthlands() {
   }
 }
 
-function updateSellZone(dt) {
-  if (!sellZone) return;
+function updateInteractionZones(dt) {
   sellCooldown -= dt;
-  const hasStock = carrots > 0 || applesCollected > 0;
+  buyCooldown -= dt;
+  if (interactionZones.length === 0) return;
+
   const pulseT = (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
   const hx = horsePos.x, hz = horsePos.z;
-  const inZone = hx > sellZone.minX && hx < sellZone.maxX && hz > sellZone.minZ && hz < sellZone.maxZ;
-  sellZone.inZone = inZone;
 
-  // Beacon pulses only when in zone with stock — cue that action is possible
-  const cueActive = inZone && hasStock;
-  sellZone.beacon.material.emissiveIntensity = cueActive ? (0.6 + pulseT * 1.4) : 0.35;
-  sellZone.beacon.scale.setScalar(cueActive ? 1.0 + pulseT * 0.4 : 1.0);
+  // Determine per-zone inZone + track nearest active zone for popup
+  let active = null;
+  let activeDist = Infinity;
+  for (const zone of interactionZones) {
+    const inZ = hx > zone.minX && hx < zone.maxX && hz > zone.minZ && hz < zone.maxZ;
+    zone.inZone = inZ;
+    if (inZ) {
+      const dx = hx - zone.cx, dz = hz - zone.cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < activeDist) { activeDist = d2; active = zone; }
+    }
+    // Beacon pulse: only when in zone AND its action is currently useful
+    let cue = false;
+    if (inZ) {
+      if (zone.kind === 'sell') {
+        cue = carrots > 0 || applesCollected > 0;
+      } else if (zone.kind === 'buy') {
+        const it = SHOP_ITEMS[zone.itemKey];
+        cue = (inventory[zone.itemKey] < it.max) && (money >= it.price);
+      }
+    }
+    zone.beacon.material.emissiveIntensity = cue ? (0.6 + pulseT * 1.4) : 0.35;
+    zone.beacon.scale.setScalar(cue ? 1.0 + pulseT * 0.4 : 1.0);
+  }
 
-  // Prompt overlay
-  updateSellPrompt(inZone, hasStock);
+  // Popup: driven by nearest active zone
+  updateInteractionPrompt(active);
 }
 
 let sellPromptEl = null;
-function updateSellPrompt(inZone, hasStock) {
+function updateInteractionPrompt(activeZone) {
   if (!sellPromptEl) {
     sellPromptEl = document.createElement('div');
     sellPromptEl.style.cssText = 'position:absolute;top:22%;left:50%;transform:translateX(-50%);'
@@ -1114,7 +1149,7 @@ function updateSellPrompt(inZone, hasStock) {
       + 'font-family:\"Segoe UI\",Tahoma,sans-serif;max-width:90vw;';
     document.body.appendChild(sellPromptEl);
   }
-  if (!inZone) {
+  if (!activeZone) {
     sellPromptEl.style.opacity = '0';
     return;
   }
@@ -1124,14 +1159,37 @@ function updateSellPrompt(inZone, hasStock) {
     + 'text-shadow:none;box-shadow:0 3px 0 #b89040,inset 0 -3px 0 rgba(0,0,0,0.15);'
     + 'vertical-align:middle;';
   let html = '';
-  if (!hasStock) {
-    html = '<div style="opacity:0.85">Nazbieraj <span style="font-size:60px">🥕</span> lub <span style="font-size:60px">🍎</span><br>i wróć tutaj sprzedać!</div>';
-  } else {
-    if (carrots > 0) {
-      html += `<div>Naciśnij <span style="${kbdStyle}">M</span> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
+  if (activeZone.kind === 'sell') {
+    const hasStock = carrots > 0 || applesCollected > 0;
+    if (!hasStock) {
+      html = '<div style="opacity:0.85">Nazbieraj <span style="font-size:60px">🥕</span> lub <span style="font-size:60px">🍎</span><br>i wróć tutaj sprzedać!</div>';
+    } else {
+      if (carrots > 0) {
+        html += `<div>Naciśnij <span style="${kbdStyle}">M</span> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
+      }
+      if (applesCollected > 0) {
+        html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
+      }
     }
-    if (applesCollected > 0) {
-      html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
+  } else if (activeZone.kind === 'buy') {
+    const it = SHOP_ITEMS[activeZone.itemKey];
+    const owned = inventory[activeZone.itemKey];
+    const priceHtml = it.price === 0
+      ? '<span style="font-size:44px;color:#ffdd77">GRATIS!</span>'
+      : `${it.price} <span style="font-size:56px">🪙</span>`;
+    if (owned >= it.max) {
+      if (activeZone.itemKey === 'list') {
+        html = `<div style="opacity:0.9">Nie ma teraz nowych<br>listów na poczcie</div>`;
+      } else {
+        html = `<div style="opacity:0.9">Masz już <span style="font-size:60px">${it.emoji}</span> ${it.name}!</div>`;
+      }
+    } else if (money < it.price) {
+      html = `<div>Za mało monet <span style="font-size:60px">🪙</span></div>`
+        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">potrzeba ${it.price}, masz ${money}</div>`;
+    } else {
+      html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
+        + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span></div>`
+        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">${it.name} — ${priceHtml}</div>`;
     }
   }
   sellPromptEl.innerHTML = html;
@@ -1157,6 +1215,76 @@ function attemptSellItem(kind) {
   spawnCoinBurst(sellZone.counterX, sellZone.counterZ, 4);
 }
 
+let deliveryCooldown = 0;
+function updateLetterDelivery(dt) {
+  deliveryCooldown -= dt;
+  if (deliveryCooldown > 0) return;
+  if (inventory.list < 1) return;
+  // Find closest FARM farmer (position within FARM_RADIUS of farm center) within 4m
+  for (const farmer of farmers) {
+    if (farmer.mounted) continue;
+    const fp = farmer.group.position;
+    const dfx = fp.x - FARM_X, dfz = fp.z - FARM_Z;
+    const inFarm = Math.sqrt(dfx * dfx + dfz * dfz) < FARM_RADIUS;
+    if (!inFarm) continue;
+    const hx = horsePos.x - fp.x, hz = horsePos.z - fp.z;
+    if (Math.sqrt(hx * hx + hz * hz) < 4) {
+      // Deliver!
+      inventory.list -= 1;
+      money += 1;
+      deliveryCooldown = 3;
+      updateCarrotHUD();
+      // Farmer waves
+      farmer.waving = true;
+      farmer.waveTime = 0;
+      // Big popup
+      showDeliveryPopup();
+      spawnCoinBurst(fp.x, fp.z, 6);
+      return;
+    }
+  }
+}
+
+let deliveryPopupEl = null;
+function showDeliveryPopup() {
+  if (!deliveryPopupEl) {
+    deliveryPopupEl = document.createElement('div');
+    deliveryPopupEl.style.cssText = 'position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);'
+      + 'background:linear-gradient(135deg,#66cc44,#33aa22);color:#fff;padding:28px 52px;'
+      + 'border-radius:28px;font-size:52px;font-weight:900;pointer-events:none;'
+      + 'text-shadow:2px 2px 0 rgba(0,0,0,0.4);z-index:210;'
+      + 'box-shadow:0 12px 40px rgba(0,0,0,0.5);border:4px solid #fff;'
+      + 'transition:opacity 0.4s,transform 0.4s;opacity:0;text-align:center;';
+    document.body.appendChild(deliveryPopupEl);
+  }
+  deliveryPopupEl.innerHTML = 'List dostarczony!<br><span style="font-size:80px">💌 → 🪙</span>';
+  deliveryPopupEl.style.opacity = '1';
+  deliveryPopupEl.style.transform = 'translate(-50%,-50%) scale(1.15)';
+  setTimeout(() => {
+    if (deliveryPopupEl) {
+      deliveryPopupEl.style.opacity = '0';
+      deliveryPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    }
+  }, 1600);
+}
+
+function attemptBuyItem(itemKey) {
+  const it = SHOP_ITEMS[itemKey];
+  if (!it) return;
+  // Find the active buy zone matching itemKey (must be nearest — but simplest: any inZone match).
+  const zone = interactionZones.find(z => z.kind === 'buy' && z.itemKey === itemKey && z.inZone);
+  if (!zone) return;
+  if (buyCooldown > 0) return;
+  if (inventory[itemKey] >= it.max) return;
+  if (money < it.price) return;
+  money -= it.price;
+  inventory[itemKey] += 1;
+  buyCooldown = 0.25;
+  updateCarrotHUD();
+  showBuyPopup(itemKey);
+  spawnCoinBurst(zone.counterX, zone.counterZ, 4);
+}
+
 let sellPopupEl = null;
 function showSellPopup(amount) {
   if (!sellPopupEl) {
@@ -1176,6 +1304,30 @@ function showSellPopup(amount) {
     if (sellPopupEl) {
       sellPopupEl.style.opacity = '0';
       sellPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    }
+  }, 900);
+}
+
+let buyPopupEl = null;
+function showBuyPopup(itemKey) {
+  const it = SHOP_ITEMS[itemKey];
+  if (!buyPopupEl) {
+    buyPopupEl = document.createElement('div');
+    buyPopupEl.style.cssText = 'position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);'
+      + 'background:linear-gradient(135deg,#88ddff,#4488cc);color:#0a2038;'
+      + 'padding:24px 48px;border-radius:24px;font-size:56px;font-weight:900;'
+      + 'text-shadow:2px 2px 0 #fff,-1px -1px 0 #fff;pointer-events:none;'
+      + 'box-shadow:0 8px 30px rgba(0,0,0,0.4);z-index:200;'
+      + 'transition:opacity 0.4s,transform 0.4s;opacity:0;';
+    document.body.appendChild(buyPopupEl);
+  }
+  buyPopupEl.innerHTML = `+1 ${it.emoji} ${it.name}!`;
+  buyPopupEl.style.opacity = '1';
+  buyPopupEl.style.transform = 'translate(-50%,-50%) scale(1.2)';
+  setTimeout(() => {
+    if (buyPopupEl) {
+      buyPopupEl.style.opacity = '0';
+      buyPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
     }
   }, 900);
 }
@@ -1480,6 +1632,10 @@ function buildSaloon(x, z, side) {
   _addWindow(group,  w / 3 + 0.5, 1.4, d, 0.9, 0.7);
 
   _placeBuilding(group, x, z, side, w, d);
+
+  // Buy counter — drinks
+  const frontDX = (side === -1 ? 1 : -1);
+  buildBuyCounter(x + frontDX * (d / 2 + 2.5), z, frontDX, 'napoj');
 }
 
 // ----- SHERIFF: small, iron-barred window, big star, jail look -----
@@ -1535,6 +1691,10 @@ function buildSheriff(x, z, side) {
   _addWindow(group, -w / 3, 2.0, d, 0.9, 0.7);
 
   _placeBuilding(group, x, z, side, w, d);
+
+  // Buy counter — sheriff badge
+  const frontDX = (side === -1 ? 1 : -1);
+  buildBuyCounter(x + frontDX * (d / 2 + 2.5), z, frontDX, 'odznaka');
 }
 
 // ----- BANK: stone columns, heavy door, vault feel -----
@@ -1656,6 +1816,10 @@ function buildBank(x, z, side) {
   }
 
   _placeBuilding(group, x, z, side, w, d);
+
+  // Buy counter — diamond
+  const frontDX = (side === -1 ? 1 : -1);
+  buildBuyCounter(x + frontDX * (d / 2 + 2.5), z, frontDX, 'diament');
 }
 
 // ----- STORE: big window display with goods, awning, barrels -----
@@ -1749,6 +1913,8 @@ function buildStore(x, z, side) {
   const counterX = x + frontDX * (d / 2 + 2.5);
   const counterZ = z;
   buildSellCounter(counterX, counterZ, frontDX);
+  // Buy counter — hay, placed alongside so the kid can hop between the two
+  buildBuyCounter(counterX, counterZ + 3, frontDX, 'siano');
 }
 
 function buildSellCounter(x, z, frontDX) {
@@ -1846,9 +2012,207 @@ function buildSellCounter(x, z, frontDX) {
   sellZone = {
     minX: x - zoneR, maxX: x + zoneR,
     minZ: z - zoneR, maxZ: z + zoneR,
+    cx: x, cz: z,
     counterX: x, counterZ: z,
     beacon,
+    kind: 'sell',
+    inZone: false,
   };
+  interactionZones.push(sellZone);
+}
+
+// Buy counter — same table+sign+beacon as sell counter, but shows single item
+// price and its buy-key. Placed in front of each Wild-West shop building.
+function buildBuyCounter(x, z, frontDX, itemKey) {
+  const it = SHOP_ITEMS[itemKey];
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  const woodMat = _mat(0x8b6238, 0.9);
+  const darkWood = _mat(0x5a3a1f, 0.9);
+
+  // Counter table
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.12, 1.0), woodMat);
+  top.position.y = 1.0;
+  top.castShadow = true;
+  group.add(top);
+  // Legs
+  for (const [lx, lz] of [[-1.0, -0.4], [1.0, -0.4], [-1.0, 0.4], [1.0, 0.4]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 0.1), darkWood);
+    leg.position.set(lx, 0.5, lz);
+    group.add(leg);
+  }
+  // Front skirt board
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.08), darkWood);
+  skirt.position.set(0, 0.75, 0.46 * frontDX);
+  group.add(skirt);
+
+  // 3D display item on the counter (visual identity for each shop)
+  const display = buildBuyCounterDisplay(itemKey);
+  if (display) {
+    display.position.y += 1.08; // sit on counter top
+    group.add(display);
+  }
+
+  // Sign post above counter — price + item + key badge
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 512; signCanvas.height = 220;
+  const ctx = signCanvas.getContext('2d');
+  ctx.fillStyle = '#3a1d08';
+  ctx.fillRect(0, 0, 512, 220);
+  ctx.strokeStyle = '#f6d990';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(8, 8, 496, 204);
+  // Row 1: CENA
+  ctx.font = 'bold 44px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f6d990';
+  ctx.fillText('CENA', 256, 36);
+  ctx.strokeStyle = '#f6d990';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(180, 60);
+  ctx.lineTo(332, 60);
+  ctx.stroke();
+  // Row 2: emoji = price 🪙 (or GRATIS)
+  ctx.font = 'bold 48px Arial';
+  if (it.price === 0) {
+    ctx.fillText(`${it.emoji} = GRATIS!`, 256, 112);
+  } else {
+    // Repeat 🪙 up to 3, otherwise show N🪙
+    let coinStr;
+    if (it.price <= 3) coinStr = '🪙'.repeat(it.price);
+    else coinStr = `${it.price}🪙`;
+    ctx.fillText(`${it.emoji} = ${coinStr}`, 256, 112);
+  }
+  // Row 3: yellow key badge with letter
+  const badgeW = 90, badgeH = 60;
+  const badgeX = 256 - badgeW / 2, badgeY = 160;
+  ctx.fillStyle = '#f6d990';
+  ctx.beginPath();
+  const r = 10;
+  ctx.moveTo(badgeX + r, badgeY);
+  ctx.lineTo(badgeX + badgeW - r, badgeY);
+  ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + r);
+  ctx.lineTo(badgeX + badgeW, badgeY + badgeH - r);
+  ctx.quadraticCurveTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - r, badgeY + badgeH);
+  ctx.lineTo(badgeX + r, badgeY + badgeH);
+  ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - r);
+  ctx.lineTo(badgeX, badgeY + r);
+  ctx.quadraticCurveTo(badgeX, badgeY, badgeX + r, badgeY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#3a1d08';
+  ctx.font = 'bold 48px monospace';
+  ctx.fillText(it.keyLabel, 256, badgeY + badgeH / 2 + 2);
+  const signTex = new THREE.CanvasTexture(signCanvas);
+  signTex.colorSpace = THREE.SRGBColorSpace;
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.4, 1.03),
+    new THREE.MeshBasicMaterial({ map: signTex })
+  );
+  sign.position.set(0, 2.55, 0);
+  sign.rotation.y = frontDX === 1 ? Math.PI / 2 : -Math.PI / 2;
+  group.add(sign);
+  // Sign posts
+  for (const px of [-1.2, 1.2]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6), darkWood);
+    post.position.set(px, 1.3, 0);
+    group.add(post);
+  }
+  // Glow beacon on top
+  const beacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0xffaa22, emissiveIntensity: 1.0 })
+  );
+  beacon.position.set(0, 3.0, 0);
+  group.add(beacon);
+  const beaconLight = new THREE.PointLight(0xffcc44, 0.8, 8);
+  beaconLight.position.set(0, 3.0, 0);
+  group.add(beaconLight);
+
+  group.position.set(x, h, z);
+  scene.add(group);
+
+  const zoneR = 5.5;
+  interactionZones.push({
+    minX: x - zoneR, maxX: x + zoneR,
+    minZ: z - zoneR, maxZ: z + zoneR,
+    cx: x, cz: z,
+    counterX: x, counterZ: z,
+    beacon,
+    kind: 'buy',
+    itemKey,
+    inZone: false,
+  });
+}
+
+// Small 3D trinket shown on top of the buy counter for each shop.
+function buildBuyCounterDisplay(itemKey) {
+  const g = new THREE.Group();
+  if (itemKey === 'napoj') {
+    const glass = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.15, 0.15, 0.3, 12),
+      new THREE.MeshStandardMaterial({ color: 0x66aaff, transparent: true, opacity: 0.75, roughness: 0.15, metalness: 0.2 })
+    );
+    glass.position.y = 0.15;
+    g.add(glass);
+  } else if (itemKey === 'siano') {
+    const bale = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.2, 0.4, 8),
+      new THREE.MeshStandardMaterial({ color: 0xd4b060, roughness: 0.95 })
+    );
+    bale.rotation.z = Math.PI / 2;
+    bale.position.y = 0.2;
+    g.add(bale);
+  } else if (itemKey === 'diament') {
+    const gem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.15),
+      new THREE.MeshStandardMaterial({ color: 0x88ddff, roughness: 0.1, metalness: 0.9 })
+    );
+    gem.position.y = 0.2;
+    g.add(gem);
+  } else if (itemKey === 'odznaka') {
+    // 5-pointed star flat shape
+    const shape = new THREE.Shape();
+    const pts = 5, outer = 0.55, inner = 0.22;
+    for (let i = 0; i < pts * 2; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (i / (pts * 2)) * Math.PI * 2 - Math.PI / 2;
+      if (i === 0) shape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    const star = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshStandardMaterial({ color: 0xf0d040, roughness: 0.3, metalness: 0.7, emissive: 0x553300, emissiveIntensity: 0.5 })
+    );
+    star.scale.setScalar(0.6);
+    star.rotation.x = -Math.PI / 2;
+    star.position.y = 0.05;
+    g.add(star);
+  } else if (itemKey === 'list') {
+    const env = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.03, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0xf6ecd0, roughness: 0.9 })
+    );
+    env.position.y = 0.03;
+    g.add(env);
+    const seal = new THREE.Mesh(
+      new THREE.SphereGeometry(0.04, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.4 })
+    );
+    seal.position.set(0.1, 0.06, 0.08);
+    g.add(seal);
+  } else if (itemKey === 'podkowa') {
+    const shoe = new THREE.Mesh(
+      new THREE.TorusGeometry(0.15, 0.04, 6, 12, Math.PI * 1.35),
+      new THREE.MeshStandardMaterial({ color: 0x606060, roughness: 0.4, metalness: 0.7 })
+    );
+    shoe.rotation.x = -Math.PI / 2;
+    shoe.position.y = 0.05;
+    g.add(shoe);
+  }
+  return g;
 }
 
 // ----- POST OFFICE: small with mailbox out front, letter on facade -----
@@ -1926,6 +2290,10 @@ function buildPost(x, z, side) {
   group.add(flag);
 
   _placeBuilding(group, x, z, side, w, d);
+
+  // Buy counter — letter (free)
+  const frontDX = (side === -1 ? 1 : -1);
+  buildBuyCounter(x + frontDX * (d / 2 + 2.5), z, frontDX, 'list');
 }
 
 // ----- BLACKSMITH: open shed, chimney, anvil, forge with glowing fire -----
@@ -2065,6 +2433,10 @@ function buildBlacksmith(x, z, side) {
   group.add(hammerHandle);
 
   _placeBuilding(group, x, z, side, w, d);
+
+  // Buy counter — horseshoe
+  const frontDX = (side === -1 ? 1 : -1);
+  buildBuyCounter(x + frontDX * (d / 2 + 2.5), z, frontDX, 'podkowa');
 }
 
 function buildWaterTower(x, z) {
@@ -3927,6 +4299,12 @@ function initInput() {
     if (e.code === 'Space') handleSpaceAction();
     if (e.code === 'KeyM') attemptSellItem('carrot');
     if (e.code === 'KeyJ') attemptSellItem('apple');
+    if (e.code === 'KeyN') attemptBuyItem('napoj');
+    if (e.code === 'KeyS') attemptBuyItem('siano');
+    if (e.code === 'KeyD') attemptBuyItem('diament');
+    if (e.code === 'KeyO') attemptBuyItem('odznaka');
+    if (e.code === 'KeyL') attemptBuyItem('list');
+    if (e.code === 'KeyP') attemptBuyItem('podkowa');
     if (e.code === 'Escape') resetGame();
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -4029,17 +4407,17 @@ function getInput() {
 
 // ========== MINIMAP ==========
 let minimapCanvas, minimapCtx;
-function buildCollectRow(emoji, bundleEmoji, basketEmoji, count) {
+// Row rendering: <5 items → individual icons; ≥5 → "emoji × N" as big readable number
+function buildCollectRow(emoji, count) {
   if (count === 0) return '';
-  const baskets = Math.floor(count / 25);
-  const afterBaskets = count % 25;
-  const bundles = Math.floor(afterBaskets / 5);
-  const singles = afterBaskets % 5;
-
+  if (count >= 5) {
+    return `<div class="row" style="font-size:44px;font-weight:900;line-height:1.1;display:flex;align-items:center;gap:8px">`
+      + `<span style="font-size:52px">${emoji}</span>`
+      + `<span style="color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${count}</span>`
+      + `</div>`;
+  }
   let html = '';
-  for (let i = 0; i < baskets; i++) html += `<span class="basket">${basketEmoji}</span>`;
-  for (let i = 0; i < bundles; i++) html += `<span class="bundle">${bundleEmoji}</span>`;
-  for (let i = 0; i < singles; i++) html += `<span class="single">${emoji}</span>`;
+  for (let i = 0; i < count; i++) html += `<span class="single">${emoji}</span>`;
   return `<div class="row">${html}</div>`;
 }
 
@@ -4047,11 +4425,25 @@ function updateCarrotHUD() {
   const hud = document.getElementById('collect-hud');
   if (!hud) return;
 
-  // 🥕 single, 🥕🥕🥕🥕🥕 = one bundle symbol, 5 bundles = basket
   let html = '';
-  html += buildCollectRow('🥕', '🥕🥕', '🧺', carrots);        // carrot, bundle of 5, basket of 25
-  html += buildCollectRow('🍎', '🍎🍎', '🪣', applesCollected); // apple, bundle of 5, bucket of 25
-  html += buildCollectRow('🪙', '🪙🪙', '💰', money);           // coin, bundle of 5, moneybag of 25
+  html += buildCollectRow('🥕', carrots);
+  html += buildCollectRow('🍎', applesCollected);
+  // Money: always shown as big number in its own row (kid reads exact coin count)
+  html += `<div class="row" style="font-size:44px;font-weight:900;line-height:1.1;display:flex;align-items:center;gap:8px">`
+    + `<span style="font-size:52px">🪙</span>`
+    + `<span style="color:#ffd944;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${money}</span>`
+    + `</div>`;
+
+  // Inventory: one row per item, same emoji × N formatting for consistency
+  for (const k of Object.keys(SHOP_ITEMS)) {
+    const n = inventory[k] || 0;
+    if (n > 0) {
+      html += `<div class="row" style="font-size:36px;font-weight:800;line-height:1.1;display:flex;align-items:center;gap:8px">`
+        + `<span style="font-size:44px">${SHOP_ITEMS[k].emoji}</span>`
+        + `<span style="color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${n}</span>`
+        + `</div>`;
+    }
+  }
 
   hud.innerHTML = html || '&nbsp;';
 
@@ -4506,7 +4898,8 @@ function update() {
   animateBirds(dt);
   animateTumbleweeds(dt);
   animateCoinBurst(dt);
-  updateSellZone(dt);
+  updateInteractionZones(dt);
+  updateLetterDelivery(dt);
   updateCrab(dt);
   updateDalmatian(dt);
   updateCheetah(dt);
@@ -4931,7 +5324,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, level, maxNumber,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, level, maxNumber,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -5096,6 +5489,9 @@ window.startGame = async function () {
     carrots = saved.carrots;
     applesCollected = saved.applesCollected || 0;
     money = saved.money || 0;
+    if (saved.inventory) {
+      inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, ...saved.inventory };
+    }
     level = saved.level;
     maxNumber = saved.maxNumber;
     correctAnswers = saved.correctAnswers;
