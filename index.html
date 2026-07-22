@@ -417,6 +417,8 @@ let drinkTimer = 0;
 
 // Horse movement
 const horsePos = new THREE.Vector3(0, 0, 0);
+// Scratch vector reused every frame for camera target — avoids per-frame allocation.
+const _scratchCamTarget = new THREE.Vector3();
 window.__horse = { get pos() { return horsePos; }, get angle() { return horseAngle; }, set angle(v) { horseAngle = v; } };
 let horseAngle = 0;
 let horseSpeed = 0;
@@ -1149,6 +1151,15 @@ function handColor(keyLetter) {
   return LEFT_HAND_LETTERS.has(keyLetter) ? '#7cc8ff' : '#8dea8d';
 }
 
+// Per-frame HUD writers used to re-parse identical HTML every frame. Cache the
+// last string per element so we only touch innerHTML when it actually changes.
+const __htmlCache = new WeakMap();
+function setHTMLIfChanged(el, html) {
+  if (__htmlCache.get(el) === html) return;
+  __htmlCache.set(el, html);
+  el.innerHTML = html;
+}
+
 function updateInteractionZones(dt) {
   sellCooldown -= dt;
   buyCooldown -= dt;
@@ -1262,7 +1273,7 @@ function updateInteractionPrompt(activeZone) {
         + `<div style="margin-top:10px;font-size:36px;opacity:0.9">${it.name} — ${priceHtml}</div>`;
     }
   }
-  sellPromptEl.innerHTML = html;
+  setHTMLIfChanged(sellPromptEl, html);
   sellPromptEl.style.opacity = '1';
 }
 
@@ -1457,8 +1468,8 @@ function updatePassengerBubble(farmer) {
     + `<div style="margin-top:12px;font-size:32px;color:#ffdd77">Zapłacę ${q.reward} <span style="font-size:40px">🪙</span></div>`
     + `<div style="margin-top:14px;font-size:28px;opacity:0.9">Naciśnij <span style="${kbdStyle}">SPACJA</span> żeby wsiąść</div>`;
   // Preserve the tail child by rebuilding safely
-  passengerBubbleEl.innerHTML = html
-    + '<div style="position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);color:#ffcc33;font-size:44px;line-height:1;text-shadow:none;">▼</div>';
+  setHTMLIfChanged(passengerBubbleEl, html
+    + '<div style="position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);color:#ffcc33;font-size:44px;line-height:1;text-shadow:none;">▼</div>');
   passengerBubbleEl.style.opacity = '1';
 }
 
@@ -1476,7 +1487,7 @@ function updatePassengerHudIndicator() {
   }
   if (ridingFarmer && ridingFarmer.quest) {
     const q = ridingFarmer.quest;
-    passengerHudEl.innerHTML = `→ ${q.destination.emoji} ${q.destination.hudName} · ${q.reward} <span style="font-size:30px">🪙</span>`;
+    setHTMLIfChanged(passengerHudEl, `→ ${q.destination.emoji} ${q.destination.hudName} · ${q.reward} <span style="font-size:30px">🪙</span>`);
     passengerHudEl.style.display = 'block';
   } else {
     passengerHudEl.style.display = 'none';
@@ -1561,8 +1572,8 @@ function updatePassengerArrivalPrompt(inRange, quest) {
     passengerArrivalEl.style.opacity = '0';
     return;
   }
-  passengerArrivalEl.innerHTML = `<span style="font-size:56px">${quest.destination.emoji}</span> Jesteś na miejscu!<br>`
-    + `<span style="font-size:34px">Naciśnij <span style="background:#f6d990;color:#3a1d08;padding:2px 14px;border-radius:8px;font-family:monospace;font-weight:900">SPACJA</span> żeby wysadzić i dostać ${quest.reward} 🪙</span>`;
+  setHTMLIfChanged(passengerArrivalEl, `<span style="font-size:56px">${quest.destination.emoji}</span> Jesteś na miejscu!<br>`
+    + `<span style="font-size:34px">Naciśnij <span style="background:#f6d990;color:#3a1d08;padding:2px 14px;border-radius:8px;font-family:monospace;font-weight:900">SPACJA</span> żeby wysadzić i dostać ${quest.reward} 🪙</span>`);
   passengerArrivalEl.style.opacity = '1';
 }
 function completePassengerDelivery(farmer) {
@@ -5092,9 +5103,13 @@ function updateCarrotHUD() {
 
   hud.innerHTML = html || '&nbsp;';
 
-  // Pop animation
+  // Pop animation — clear any previous timer so rapid buys/sells don't stack.
   hud.style.transform = 'scale(1.15)';
-  setTimeout(() => { hud.style.transform = 'scale(1)'; }, 200);
+  if (updateCarrotHUD._popTimer) clearTimeout(updateCarrotHUD._popTimer);
+  updateCarrotHUD._popTimer = setTimeout(() => {
+    hud.style.transform = 'scale(1)';
+    updateCarrotHUD._popTimer = 0;
+  }, 200);
 }
 
 // Cheap per-frame stamina bar refresh — mutates only the fill width + label
@@ -5523,26 +5538,24 @@ function update() {
   // Animate horse
   animateHorse(dt, input.moving);
 
-  // Camera follow
+  // Camera follow — reuse a single scratch Vector3 per frame instead of alloc.
   // Camera — during eating, swing to the side so carrots are visible
-  let camTarget;
   if (isEatingCarrots) {
-    // Cinematic close-up from the side — like a cutscene
     const perpX = Math.cos(horseAngle);
     const perpZ = -Math.sin(horseAngle);
-    camTarget = new THREE.Vector3(
+    _scratchCamTarget.set(
       horsePos.x + perpX * 3 + Math.sin(horseAngle) * 0.5,
       horsePos.y + 1.5,
       horsePos.z + perpZ * 3 + Math.cos(horseAngle) * 0.5
     );
   } else {
-    camTarget = new THREE.Vector3(
+    _scratchCamTarget.set(
       horsePos.x - Math.sin(horseAngle) * 6,
       horsePos.y + 4.5,
       horsePos.z - Math.cos(horseAngle) * 6
     );
   }
-  camera.position.lerp(camTarget, dt * 3);
+  camera.position.lerp(_scratchCamTarget, dt * 3);
   camera.lookAt(
     horsePos.x + Math.sin(horseAngle) * (isEatingCarrots ? 1 : 2),
     horsePos.y + (isEatingCarrots ? 0.5 : 1.0),
@@ -5744,7 +5757,41 @@ function update() {
     window.__fpsStart = performance.now();
   }
 
+  updateFpsMeter();
   requestAnimationFrame(update);
+}
+
+// ===== FPS meter (?fps=1) — cheap rolling window, only ticks DOM every ~0.5s =====
+let fpsMeterEl = null;
+let fpsMeterFrames = 0;
+let fpsMeterStart = 0;
+function updateFpsMeter() {
+  if (fpsMeterEl === null) {
+    if (!/[?&]fps=1\b/.test(location.search)) { fpsMeterEl = false; return; }
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;bottom:8px;right:8px;background:rgba(0,0,0,0.55);'
+      + 'color:#8fffa5;padding:4px 10px;border-radius:8px;font:600 14px/1.1 monospace;'
+      + 'pointer-events:none;z-index:9999;text-shadow:1px 1px 0 rgba(0,0,0,0.8);';
+    el.textContent = '…';
+    document.body.appendChild(el);
+    fpsMeterEl = el;
+    fpsMeterStart = performance.now();
+  }
+  if (!fpsMeterEl) return;
+  fpsMeterFrames++;
+  const now = performance.now();
+  const dt = now - fpsMeterStart;
+  if (dt >= 500) {
+    const fps = (fpsMeterFrames * 1000) / dt;
+    const info = renderer.info;
+    fpsMeterEl.textContent =
+      Math.round(fps) + ' fps · '
+      + info.render.calls + ' dc · '
+      + (info.render.triangles / 1000).toFixed(1) + 'k tri';
+    fpsMeterEl.style.color = fps >= 55 ? '#8fffa5' : fps >= 30 ? '#ffe08a' : '#ff8a8a';
+    fpsMeterFrames = 0;
+    fpsMeterStart = now;
+  }
 }
 
 function animateBucketTip(pile, isCorrect, challenge) {
