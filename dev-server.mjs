@@ -48,7 +48,8 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  let filePath = path.join(DIR, req.url === '/' ? 'index.html' : req.url);
+  const urlPath = req.url.split('?')[0].split('#')[0];
+  let filePath = path.join(DIR, urlPath === '/' ? 'index.html' : urlPath);
   const ext = path.extname(filePath);
   const contentType = mimeTypes[ext] || 'application/octet-stream';
 
