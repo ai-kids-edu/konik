@@ -1359,13 +1359,14 @@ function _addFalseFront(group, w, d, hgt, wallMat, label, signColors = {}) {
   facade.position.set(0, facadeH / 2, d / 2 + 0.18);
   facade.castShadow = true;
   group.add(facade);
-  // Sign
+  // Sign — must sit forward of roof front edge (roof extends to d/2 + 0.8)
+  // and above balcony/porch (0.78 * hgt) to stay unobstructed.
   const tex = _signTexture(label, signColors.bg, signColors.fg, signColors.font);
   const sign = new THREE.Mesh(
-    new THREE.PlaneGeometry(Math.min(w * 0.8, 6.5), 1.05),
+    new THREE.PlaneGeometry(Math.min(w * 0.8, 6.5), 1.1),
     new THREE.MeshBasicMaterial({ map: tex })
   );
-  sign.position.set(0, hgt * 1.05, d / 2 + 0.37);
+  sign.position.set(0, hgt * 1.2, d / 2 + 0.95);
   group.add(sign);
 }
 
@@ -1570,13 +1571,13 @@ function buildBank(x, z, side) {
   pediment.position.set(0, hgt, d / 2 + 0.05);
   group.add(pediment);
 
-  // BANK sign on pediment
+  // BANK sign on pediment — pushed forward past roof front edge (d/2 + 0.8)
   const tex = _signTexture('BANK', '#2a2018', '#e8c870', 'bold 84px Georgia, serif');
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(4.5, 0.9),
     new THREE.MeshBasicMaterial({ map: tex })
   );
-  sign.position.set(0, hgt + 0.5, d / 2 + 0.36);
+  sign.position.set(0, hgt + 0.7, d / 2 + 0.95);
   group.add(sign);
 
   // Two front columns (Greek style)
@@ -1839,8 +1840,9 @@ function buildSellCounter(x, z, frontDX) {
   group.position.set(x, h, z);
   scene.add(group);
 
-  // Register sell zone — small area in front of counter
-  const zoneR = 2.5;
+  // Register sell zone — generous area around counter (kid doesn't need to
+  // pixel-perfect park in front of it)
+  const zoneR = 5.5;
   sellZone = {
     minX: x - zoneR, maxX: x + zoneR,
     minZ: z - zoneR, maxZ: z + zoneR,
@@ -1978,13 +1980,13 @@ function buildBlacksmith(x, z, side) {
   smoke.position.set(-w / 3, hgt + 2.6, -d / 2 - 0.3);
   group.add(smoke);
 
-  // Sign on top edge of roof front
+  // Sign on top edge of roof front — pushed forward past roof lip
   const tex = _signTexture('KOWAL', '#1a0a04', '#f6d990');
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(4.5, 0.9),
     new THREE.MeshBasicMaterial({ map: tex })
   );
-  sign.position.set(0, hgt + 0.5, d / 2 + 0.5);
+  sign.position.set(0, hgt + 0.7, d / 2 + 1.05);
   group.add(sign);
 
   // Anvil out front (cone-trapezoid shape)
@@ -4939,7 +4941,16 @@ function saveState() {
 
 function loadState() {
   try {
-    const raw = localStorage.getItem('horseGameState');
+    let raw = localStorage.getItem('horseGameState');
+    if (!raw) {
+      // Migrate from previous sessionStorage-based build so kids don't
+      // lose progress on the first reload after this switch.
+      raw = sessionStorage.getItem('horseGameState');
+      if (raw) {
+        localStorage.setItem('horseGameState', raw);
+        sessionStorage.removeItem('horseGameState');
+      }
+    }
     if (!raw) return null;
     return JSON.parse(raw);
   } catch { return null; }
