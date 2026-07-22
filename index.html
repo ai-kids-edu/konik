@@ -1862,11 +1862,8 @@ function showConsumePopup(html) {
 }
 
 function attemptJump() {
-  if (isJumping) return;
-  isJumping = true;
-  jumpVy = 6;
-  // Play the horse's gallop_jump animation (~0.9s); return to idle after.
-  playHorseAnimation('gallop_jump', 900);
+  // Play the horse's gallop_jump animation (~0.9s) only if the jump fired.
+  if (HorseMotion.jump()) playHorseAnimation('gallop_jump', 900);
 }
 
 function attemptEatHay() {
@@ -5266,10 +5263,14 @@ function getInput() {
   // Freeze controls while eating
   if (isEatingCarrots) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
 
-  if (keys['ArrowUp'] || keys['KeyW']) forward = 1;
-  if (keys['ArrowDown'] || keys['KeyS']) forward = -1;
-  if (keys['ArrowLeft'] || keys['KeyA']) { turn = 1; turnIntent = 1; }
-  if (keys['ArrowRight'] || keys['KeyD']) { turn = -1; turnIntent = -1; }
+  // Steering is arrow keys only (+ mobile joystick below). WASD is intentionally
+  // NOT bound to movement: W/S/D are action keys (drink napój / buy siano / buy
+  // diament), and aliasing them to steering made the horse drink or buy while the
+  // child was only trying to move.
+  if (keys['ArrowUp']) forward = 1;
+  if (keys['ArrowDown']) forward = -1;
+  if (keys['ArrowLeft']) { turn = 1; turnIntent = 1; }
+  if (keys['ArrowRight']) { turn = -1; turnIntent = -1; }
 
   if (isMobile) {
     forward += -joystickDir.y; // stick up = forward (negative y)
@@ -5670,121 +5671,140 @@ function handleSpaceAction() {
   }
 }
 
-// ========== GAME LOOP ==========
-function update() {
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const input = getInput();
+// ========== HORSE MOTION ==========
+// Owns the horse's kinematic step for one frame: turning, gallop acceleration,
+// collision with wall-sliding, water drag, world-bounds clamp, and the jump /
+// terrain-follow vertical. The world is reached only through the collider lists
+// and terrain helpers — that is the seam between movement and the scene. The
+// kinematic state stays in the shared globals (horsePos / horseAngle /
+// horseSpeed / currentMaxSpeed / isJumping / jumpVy / runTimer) so the many
+// readers — camera, passengers, save, minimap — are untouched; this module is
+// their single WRITER during a frame. sprint (isSprinting) is decided in the
+// loop because it is coupled to Stamina, and read here.
+const TURN_SPEED = 2.0;
+const JUMP_V0 = 6;
+const JUMP_GRAVITY = 15;
+const HORSE_RADIUS = 0.8;
+const HorseMotion = {
+  // Begin a jump if grounded. Returns true if it actually started, so the caller
+  // can play the jump animation only when the jump fires.
+  jump() {
+    if (isJumping) return false;
+    isJumping = true;
+    jumpVy = JUMP_V0;
+    return true;
+  },
 
-  // Rotate horse (tank-style turning) — slower for easier aiming
-  const turnSpeed = 2.0;
-  horseAngle += input.turn * turnSpeed * dt;
-  // Meter shows the raw steering intent (full range) so a full push reads as a
-  // full turn, even though the horse itself rotates on the softened curve.
-  updateSteerIndicator(input.turnIntent, input.moving);
+  // Advance the horse one frame. input: {turn, forward, turnIntent, moving}.
+  // Reads isSprinting.
+  step(input, dt) {
+    // Tank-style turning — slower for easier aiming.
+    horseAngle += input.turn * TURN_SPEED * dt;
 
-  // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
-  isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
-  if (isSprinting) Stamina.drain(dt); else Stamina.regen(dt);
-  const sprintMult = isSprinting ? SPRINT_MULT : 1.0;
-  if (isSprinting) ensureSprintSparkles();
+    // Gallop acceleration: max speed ramps the longer you keep running.
+    const sprintMult = isSprinting ? SPRINT_MULT : 1.0;
+    if (Math.abs(input.forward) > 0.1) {
+      runTimer += dt;
+      const gallopT = THREE.MathUtils.clamp((runTimer - 1.5) / 3.0, 0, 1);
+      currentMaxSpeed = THREE.MathUtils.lerp(BASE_SPEED, MAX_SPEED, gallopT);
+      const targetSpeed = currentMaxSpeed * sprintMult * input.forward;
+      horseSpeed = THREE.MathUtils.lerp(horseSpeed, targetSpeed, dt * 5);
+    } else {
+      runTimer = 0;
+      currentMaxSpeed = BASE_SPEED;
+      horseSpeed = THREE.MathUtils.lerp(horseSpeed, 0, dt * 8);
+    }
 
-  // Move horse forward/backward — accelerate over time for gallop
-  if (Math.abs(input.forward) > 0.1) {
-    runTimer += dt;
-    // After 1.5s of running, gradually increase max speed up to MAX_SPEED
-    const gallopT = THREE.MathUtils.clamp((runTimer - 1.5) / 3.0, 0, 1);
-    currentMaxSpeed = THREE.MathUtils.lerp(BASE_SPEED, MAX_SPEED, gallopT);
-    const targetSpeed = currentMaxSpeed * sprintMult * input.forward;
-    horseSpeed = THREE.MathUtils.lerp(horseSpeed, targetSpeed, dt * 5);
-  } else {
-    runTimer = 0;
-    currentMaxSpeed = BASE_SPEED;
-    horseSpeed = THREE.MathUtils.lerp(horseSpeed, 0, dt * 8);
-  }
+    if (Math.abs(horseSpeed) > 0.01) this._move(dt);
 
-  if (Math.abs(horseSpeed) > 0.01) {
+    // Water drag.
+    const waterDepth = getWaterDepth(horsePos.x, horsePos.z);
+    if (waterDepth > 0) {
+      horseSpeed *= Math.max(0.3, 1.0 - waterDepth * 1.5);
+    }
+
+    this._vertical(dt);
+  },
+
+  // Advance position with barn/tree collision, wall-sliding, water block, clamp.
+  _move(dt) {
     const nextX = horsePos.x + Math.sin(horseAngle) * horseSpeed * dt;
     const nextZ = horsePos.z + Math.cos(horseAngle) * horseSpeed * dt;
 
-    // Prevent going too deep into water
     if (nextZ < WATER_DEEP_Z) {
-      // Check barn wall collisions
-      let blocked = false;
-      const horseR = 0.8; // horse collision radius
-      for (const c of barnColliders) {
-        if (nextX + horseR > c.minX && nextX - horseR < c.maxX &&
-            nextZ + horseR > c.minZ && nextZ - horseR < c.maxZ) {
-          blocked = true;
-          break;
-        }
-      }
-      // Check tree collisions
-      if (!blocked) {
-        for (const t of treePositions) {
-          const tdx = nextX - t.x, tdz = nextZ - t.z;
-          if (Math.sqrt(tdx * tdx + tdz * tdz) < 1.0) {
-            blocked = true;
-            break;
-          }
-        }
-      }
-      if (!blocked) {
+      if (!this._blocked(nextX, nextZ)) {
         horsePos.x = nextX;
         horsePos.z = nextZ;
       } else {
-        // Try sliding along the wall instead of full stop
-        // Test X-only movement
-        let xBlocked = false;
-        for (const c of barnColliders) {
-          if (nextX + horseR > c.minX && nextX - horseR < c.maxX &&
-              horsePos.z + horseR > c.minZ && horsePos.z - horseR < c.maxZ) {
-            xBlocked = true; break;
-          }
-        }
-        let zBlocked = false;
-        for (const c of barnColliders) {
-          if (horsePos.x + horseR > c.minX && horsePos.x - horseR < c.maxX &&
-              nextZ + horseR > c.minZ && nextZ - horseR < c.maxZ) {
-            zBlocked = true; break;
-          }
-        }
-        if (!xBlocked) horsePos.x = nextX;
-        else if (!zBlocked) horsePos.z = nextZ;
+        // Slide along the wall instead of a full stop (barn colliders only).
+        if (!this._barnBlocked(nextX, horsePos.z)) horsePos.x = nextX;
+        else if (!this._barnBlocked(horsePos.x, nextZ)) horsePos.z = nextZ;
         else horseSpeed *= 0.1;
       }
     } else {
       horseSpeed = 0;
     }
 
-    // Keep within world bounds
     horsePos.x = THREE.MathUtils.clamp(horsePos.x, -95, 95);
     horsePos.z = THREE.MathUtils.clamp(horsePos.z, CITY_SOUTH_EDGE + 5, WATER_DEEP_Z - 1);
-  }
+  },
 
-  // Slow down in water
-  const waterDepth = getWaterDepth(horsePos.x, horsePos.z);
-  if (waterDepth > 0) {
-    const slowFactor = Math.max(0.3, 1.0 - waterDepth * 1.5);
-    horseSpeed *= slowFactor;
-  }
-
-  // Set horse height to follow terrain — unless we're mid-jump
-  const terrainY = getTerrainHeight(horsePos.x, horsePos.z);
-  if (isJumping) {
-    horsePos.y += jumpVy * dt;
-    jumpVy -= 15 * dt;
-    const groundY = Math.max(terrainY, WATER_LEVEL);
-    if (horsePos.y <= groundY && jumpVy <= 0) {
-      horsePos.y = groundY;
-      isJumping = false;
-      jumpVy = 0;
-      // Force animateHorse to re-select gait next frame — playHorseAnimation
-      // fades gallop_jump to idle, but lastHorseGait may still say 'gallop'.
-      lastHorseGait = '';
+  // True if (x,z) hits a barn collider OR a tree.
+  _blocked(x, z) {
+    return this._barnBlocked(x, z) || this._treeBlocked(x, z);
+  },
+  _barnBlocked(x, z) {
+    const r = HORSE_RADIUS;
+    for (const c of barnColliders) {
+      if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) return true;
     }
-  } else {
-    horsePos.y = Math.max(terrainY, WATER_LEVEL);
-  }
+    return false;
+  },
+  _treeBlocked(x, z) {
+    for (const t of treePositions) {
+      const dx = x - t.x, dz = z - t.z;
+      if (Math.sqrt(dx * dx + dz * dz) < 1.0) return true;
+    }
+    return false;
+  },
+
+  // Jump integration, or follow the terrain when grounded.
+  _vertical(dt) {
+    const terrainY = getTerrainHeight(horsePos.x, horsePos.z);
+    if (isJumping) {
+      horsePos.y += jumpVy * dt;
+      jumpVy -= JUMP_GRAVITY * dt;
+      const groundY = Math.max(terrainY, WATER_LEVEL);
+      if (horsePos.y <= groundY && jumpVy <= 0) {
+        horsePos.y = groundY;
+        isJumping = false;
+        jumpVy = 0;
+        // Force animateHorse to re-select gait next frame — playHorseAnimation
+        // fades gallop_jump to idle, but lastHorseGait may still say 'gallop'.
+        lastHorseGait = '';
+      }
+    } else {
+      horsePos.y = Math.max(terrainY, WATER_LEVEL);
+    }
+  },
+};
+
+// ========== GAME LOOP ==========
+function update() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const input = getInput();
+
+  // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
+  isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
+  if (isSprinting) Stamina.drain(dt); else Stamina.regen(dt);
+  if (isSprinting) ensureSprintSparkles();
+
+  // Advance the horse — turning, gallop, collision, water drag, jump.
+  HorseMotion.step(input, dt);
+
+  // Steering meter (mobile): show the raw steering intent (full range) so a full
+  // push reads as a full turn, even though the horse rotates on the softened curve.
+  updateSteerIndicator(input.turnIntent, input.moving);
 
   // Update horse transform — force position from terrain, not from animation
   horseGroup.position.copy(horsePos);
