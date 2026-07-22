@@ -427,7 +427,15 @@ let currentMaxSpeed = BASE_SPEED;
 let isJumping = false;
 let jumpVy = 0;
 // Sprint (W consume) — wall-clock timestamp until which the horse gets a speed boost
-let sprintUntil = 0;
+let sprintUntil = 0; // legacy — kept only so animateSprintSparkles compiles until refactor lands
+const MAX_STAMINA = 100;
+let stamina = MAX_STAMINA;
+let isSprinting = false; // set every frame based on Shift + stamina + forward input
+const SPRINT_MULT = 1.5;
+const SPRINT_DRAIN_PER_SEC = 20;
+const STAMINA_REGEN_PER_SEC = 3;
+const NAPOJ_STAMINA = 30;
+const SIANO_STAMINA = 50;
 // Sparkle particles orbiting the horse during sprint (lazy-created)
 let sprintSparkles = [];
 // Firework burst particles (fajerwerki consume)
@@ -1746,11 +1754,11 @@ function attemptJump() {
 
 function attemptEatHay() {
   if ((inventory.siano || 0) <= 0) return;
+  if (stamina >= MAX_STAMINA) return; // no waste when full
   inventory.siano -= 1;
-  carrots += 1;
+  stamina = Math.min(MAX_STAMINA, stamina + SIANO_STAMINA);
   updateCarrotHUD();
-  showConsumePopup('<span style="font-size:60px">🥕</span> +1!');
-  // Brief eating anim — mirrors the apple-eat behavior
+  showConsumePopup(`+${SIANO_STAMINA} <span style="font-size:52px">⚡</span> staminy`);
   playHorseAnimation('eating', 1200);
   isEatingCarrots = true;
   setTimeout(() => { isEatingCarrots = false; }, 1200);
@@ -1758,11 +1766,11 @@ function attemptEatHay() {
 
 function attemptDrinkWater() {
   if ((inventory.napoj || 0) <= 0) return;
+  if (stamina >= MAX_STAMINA) return;
   inventory.napoj -= 1;
-  sprintUntil = clock.elapsedTime + 10;
-  ensureSprintSparkles();
+  stamina = Math.min(MAX_STAMINA, stamina + NAPOJ_STAMINA);
   updateCarrotHUD();
-  showConsumePopup('Sprint! <span style="font-size:60px">🏇💨</span>');
+  showConsumePopup(`+${NAPOJ_STAMINA} <span style="font-size:52px">⚡</span> staminy`);
 }
 
 function consumeFajerwerki() {
@@ -5030,6 +5038,16 @@ function updateCarrotHUD() {
     + 'font-weight:900;box-shadow:0 2px 0 #b89040;vertical-align:middle;';
 
   let html = '';
+  // Stamina bar row — actual bar fill + number are updated every frame by
+  // updateStaminaBar() so the drain animates smoothly.
+  html += `<div class="row" style="display:flex;align-items:center;gap:8px;font-size:24px;font-weight:800;color:#f6ecd0">`
+    + `<span style="font-size:32px">⚡</span>`
+    + `<div style="width:170px;height:20px;background:rgba(0,0,0,0.55);border:2px solid rgba(255,255,255,0.35);border-radius:10px;overflow:hidden;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)">`
+    + `<div id="stamina-fill" style="width:${(stamina/MAX_STAMINA)*100}%;height:100%;background:#4ade5c;transition:width 0.12s"></div>`
+    + `</div>`
+    + `<span id="stamina-num" style="text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${Math.round(stamina)}</span>`
+    + `</div>`;
+
   html += buildCollectRow('🥕', carrots);
   html += buildCollectRow('🍎', applesCollected);
   // Money: always shown as big number in its own row (kid reads exact coin count)
@@ -5064,12 +5082,32 @@ function updateCarrotHUD() {
     + `<span>skok konia</span>`
     + `<span style="font-size:18px;color:${handColor('E')};font-weight:800;opacity:0.9;margin-left:2px">${handLabel('E')} ręką</span>`
     + `</div>`;
+  // Sprint hint — Left Shift is a left-hand control; shift is not a letter
+  // so the badge shows "Shift" spelled out.
+  html += `<div class="row" style="font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
+    + `<span style="${badgeStyle};border:2px solid #7cc8ff;font-size:22px">Shift</span>`
+    + `<span>sprint (⚡)</span>`
+    + `<span style="font-size:18px;color:#7cc8ff;font-weight:800;opacity:0.9;margin-left:2px">lewą ręką</span>`
+    + `</div>`;
 
   hud.innerHTML = html || '&nbsp;';
 
   // Pop animation
   hud.style.transform = 'scale(1.15)';
   setTimeout(() => { hud.style.transform = 'scale(1)'; }, 200);
+}
+
+// Cheap per-frame stamina bar refresh — mutates only the fill width + label
+// so we avoid rerendering the whole HUD every tick.
+function updateStaminaBar() {
+  const fill = document.getElementById('stamina-fill');
+  const num = document.getElementById('stamina-num');
+  if (!fill || !num) return;
+  const pct = Math.max(0, Math.min(100, (stamina / MAX_STAMINA) * 100));
+  const color = pct > 50 ? '#4ade5c' : pct > 20 ? '#ffaa33' : '#ff5544';
+  fill.style.width = pct + '%';
+  fill.style.background = color;
+  num.textContent = Math.round(stamina);
 }
 
 function initMinimap() {
@@ -5361,8 +5399,20 @@ function update() {
   const turnSpeed = 2.0;
   horseAngle += input.turn * turnSpeed * dt;
 
+  // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
+  const wantsSprint = !!keys['ShiftLeft'] && input.forward > 0.1 && stamina > 0;
+  isSprinting = wantsSprint;
+  if (isSprinting) {
+    stamina = Math.max(0, stamina - SPRINT_DRAIN_PER_SEC * dt);
+  } else {
+    stamina = Math.min(MAX_STAMINA, stamina + STAMINA_REGEN_PER_SEC * dt);
+  }
+  const sprintMult = isSprinting ? SPRINT_MULT : 1.0;
+  // Legacy sprintUntil kept in sync so existing sparkle code activates during sprint
+  sprintUntil = isSprinting ? clock.elapsedTime + 0.05 : sprintUntil;
+  if (isSprinting) ensureSprintSparkles();
+
   // Move horse forward/backward — accelerate over time for gallop
-  const sprintMult = clock.elapsedTime < sprintUntil ? 1.5 : 1.0;
   if (Math.abs(input.forward) > 0.1) {
     runTimer += dt;
     // After 1.5s of running, gradually increase max speed up to MAX_SPEED
@@ -5566,6 +5616,7 @@ function update() {
   updateInteractionZones(dt);
   updateLetterDelivery(dt);
   updatePassengerQuests(dt);
+  updateStaminaBar();
   updateCrab(dt);
   updateDalmatian(dt);
   updateCheetah(dt);
@@ -5990,7 +6041,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, level, maxNumber,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina, level, maxNumber,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -6155,6 +6206,7 @@ window.startGame = async function () {
     carrots = saved.carrots;
     applesCollected = saved.applesCollected || 0;
     money = saved.money || 0;
+    stamina = saved.stamina != null ? saved.stamina : MAX_STAMINA;
     if (saved.inventory) {
       inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
     }
