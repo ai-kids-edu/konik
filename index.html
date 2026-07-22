@@ -1184,8 +1184,10 @@ function updateInteractionPrompt(activeZone) {
         html = `<div style="opacity:0.9">Masz już <span style="font-size:60px">${it.emoji}</span> ${it.name}!</div>`;
       }
     } else if (money < it.price) {
-      html = `<div>Za mało monet <span style="font-size:60px">🪙</span></div>`
-        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">potrzeba ${it.price}, masz ${money}</div>`;
+      html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
+        + `<div style="margin-top:6px;font-size:38px;opacity:0.95">${it.name}</div>`
+        + `<div style="margin-top:14px;font-size:36px;color:#ffb0b0">Za mało monet 🪙</div>`
+        + `<div style="margin-top:6px;font-size:32px;opacity:0.85">potrzeba <b>${it.price}</b>, masz <b>${money}</b></div>`;
     } else {
       html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
         + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span></div>`
@@ -4299,12 +4301,16 @@ function initInput() {
     if (e.code === 'Space') handleSpaceAction();
     if (e.code === 'KeyM') attemptSellItem('carrot');
     if (e.code === 'KeyJ') attemptSellItem('apple');
-    if (e.code === 'KeyN') attemptBuyItem('napoj');
-    if (e.code === 'KeyS') attemptBuyItem('siano');
-    if (e.code === 'KeyD') attemptBuyItem('diament');
-    if (e.code === 'KeyO') attemptBuyItem('odznaka');
-    if (e.code === 'KeyL') attemptBuyItem('list');
-    if (e.code === 'KeyP') attemptBuyItem('podkowa');
+    // Buy actions ignore auto-repeat so holding the key doesn't drain coins
+    // (max 80 coins/s at bank without this).
+    if (!e.repeat) {
+      if (e.code === 'KeyN') attemptBuyItem('napoj');
+      if (e.code === 'KeyS') attemptBuyItem('siano');
+      if (e.code === 'KeyD') attemptBuyItem('diament');
+      if (e.code === 'KeyO') attemptBuyItem('odznaka');
+      if (e.code === 'KeyL') attemptBuyItem('list');
+      if (e.code === 'KeyP') attemptBuyItem('podkowa');
+    }
     if (e.code === 'Escape') resetGame();
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
