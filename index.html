@@ -1100,6 +1100,16 @@ function createSouthlands() {
 }
 
 let currentActiveZone = null;
+// Standard touch-typing hand assignment (QWERTY). Teaches kids the correct
+// hand while they hunt-and-peck their way to fluency.
+const LEFT_HAND_LETTERS = new Set(['Q','W','E','R','T','A','S','D','F','G','Z','X','C','V','B']);
+function handLabel(keyLetter) {
+  return LEFT_HAND_LETTERS.has(keyLetter) ? 'lewą' : 'prawą';
+}
+function handColor(keyLetter) {
+  return LEFT_HAND_LETTERS.has(keyLetter) ? '#8dd8ff' : '#ffb0d8';
+}
+
 function updateInteractionZones(dt) {
   sellCooldown -= dt;
   buyCooldown -= dt;
@@ -1170,10 +1180,10 @@ function updateInteractionPrompt(activeZone) {
       html = '<div style="opacity:0.85">Nazbieraj <span style="font-size:60px">🥕</span> lub <span style="font-size:60px">🍎</span><br>i wróć tutaj sprzedać!</div>';
     } else {
       if (carrots > 0) {
-        html += `<div>Naciśnij <span style="${kbdStyle}">M</span> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
+        html += `<div>Naciśnij <span style="${kbdStyle}">M</span> <b style="color:${handColor('M')}">${handLabel('M')} ręką</b> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
       }
       if (applesCollected > 0) {
-        html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
+        html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> <b style="color:${handColor('J')}">${handLabel('J')} ręką</b> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
       }
     }
   } else if (activeZone.kind === 'buy') {
@@ -1206,10 +1216,10 @@ function updateInteractionPrompt(activeZone) {
       html = `<div style="font-size:72px;line-height:1">💌</div>`
         + `<div style="margin-top:8px;font-size:40px;color:#ffdd77">Nowy list dla farmera!</div>`
         + `<div style="margin-top:8px;font-size:32px;opacity:0.9">Weź i dostarcz na farmę,<br>a dostaniesz nagrodę 🪙</div>`
-        + `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span></div>`;
+        + `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span> <b style="color:${handColor(it.keyLabel)}">${handLabel(it.keyLabel)} ręką</b></div>`;
     } else {
       html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
-        + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span></div>`
+        + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span> <b style="color:${handColor(it.keyLabel)}">${handLabel(it.keyLabel)} ręką</b></div>`
         + `<div style="margin-top:10px;font-size:36px;opacity:0.9">${it.name} — ${priceHtml}</div>`;
     }
   }
