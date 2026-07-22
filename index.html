@@ -427,16 +427,27 @@ let currentMaxSpeed = BASE_SPEED;
 // Jump physics (E key)
 let isJumping = false;
 let jumpVy = 0;
-// Sprint (W consume) — wall-clock timestamp until which the horse gets a speed boost
-let sprintUntil = 0; // legacy — kept only so animateSprintSparkles compiles until refactor lands
 const MAX_STAMINA = 100;
-let stamina = MAX_STAMINA;
-let isSprinting = false; // set every frame based on Shift + stamina + forward input
 const SPRINT_MULT = 1.5;
 const SPRINT_DRAIN_PER_SEC = 20;
 const STAMINA_REGEN_PER_SEC = 3;
 const NAPOJ_STAMINA = 30;
 const SIANO_STAMINA = 50;
+let isSprinting = false; // set every frame based on Shift + stamina + forward input
+
+// Stamina — the horse's sprint fuel. Single owner for every mutation: sprint
+// drain/regen in the loop, siano/napój top-ups, and save/restore. Keeps the
+// value from desyncing and puts the arithmetic in one place. Pure, no scene deps.
+const Stamina = {
+  value: MAX_STAMINA,
+  get ratio() { return this.value / MAX_STAMINA; },
+  isEmpty() { return this.value <= 0; },
+  isFull() { return this.value >= MAX_STAMINA; },
+  drain(dt) { this.value = Math.max(0, this.value - SPRINT_DRAIN_PER_SEC * dt); },
+  regen(dt) { this.value = Math.min(MAX_STAMINA, this.value + STAMINA_REGEN_PER_SEC * dt); },
+  add(n) { this.value = Math.min(MAX_STAMINA, this.value + n); },
+  set(v) { this.value = Math.max(0, Math.min(MAX_STAMINA, v || 0)); },
+};
 // Sparkle particles orbiting the horse during sprint (lazy-created)
 let sprintSparkles = [];
 // Firework burst particles (fajerwerki consume)
@@ -1716,9 +1727,9 @@ function attemptJump() {
 
 function attemptEatHay() {
   if ((inventory.siano || 0) <= 0) return;
-  if (stamina >= MAX_STAMINA) return; // no waste when full
+  if (Stamina.isFull()) return; // no waste when full
   inventory.siano -= 1;
-  stamina = Math.min(MAX_STAMINA, stamina + SIANO_STAMINA);
+  Stamina.add(SIANO_STAMINA);
   updateCarrotHUD();
   showConsumePopup(`+${SIANO_STAMINA} <span style="font-size:52px">⚡</span> staminy`);
   playHorseAnimation('eating', 1200);
@@ -1728,9 +1739,9 @@ function attemptEatHay() {
 
 function attemptDrinkWater() {
   if ((inventory.napoj || 0) <= 0) return;
-  if (stamina >= MAX_STAMINA) return;
+  if (Stamina.isFull()) return;
   inventory.napoj -= 1;
-  stamina = Math.min(MAX_STAMINA, stamina + NAPOJ_STAMINA);
+  Stamina.add(NAPOJ_STAMINA);
   updateCarrotHUD();
   showConsumePopup(`+${NAPOJ_STAMINA} <span style="font-size:52px">⚡</span> staminy`);
 }
@@ -1763,7 +1774,7 @@ function ensureSprintSparkles() {
 }
 
 function animateSprintSparkles(dt) {
-  const active = clock.elapsedTime < sprintUntil;
+  const active = isSprinting;
   for (const s of sprintSparkles) {
     if (!active) {
       if (s.mesh.visible) s.mesh.visible = false;
@@ -5003,9 +5014,9 @@ function updateCarrotHUD() {
   html += `<div class="row" style="display:flex;align-items:center;gap:8px;font-size:24px;font-weight:800;color:#f6ecd0">`
     + `<span style="font-size:32px">⚡</span>`
     + `<div style="width:170px;height:20px;background:rgba(0,0,0,0.55);border:2px solid rgba(255,255,255,0.35);border-radius:10px;overflow:hidden;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)">`
-    + `<div id="stamina-fill" style="width:${(stamina/MAX_STAMINA)*100}%;height:100%;background:#4ade5c;transition:width 0.12s"></div>`
+    + `<div id="stamina-fill" style="width:${Stamina.ratio*100}%;height:100%;background:#4ade5c;transition:width 0.12s"></div>`
     + `</div>`
-    + `<span id="stamina-num" style="text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${Math.round(stamina)}</span>`
+    + `<span id="stamina-num" style="text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${Math.round(Stamina.value)}</span>`
     + `</div>`;
 
   html += buildCollectRow('🥕', carrots);
@@ -5067,11 +5078,11 @@ function updateStaminaBar() {
   const fill = document.getElementById('stamina-fill');
   const num = document.getElementById('stamina-num');
   if (!fill || !num) return;
-  const pct = Math.max(0, Math.min(100, (stamina / MAX_STAMINA) * 100));
+  const pct = Math.max(0, Math.min(100, Stamina.ratio * 100));
   const color = pct > 50 ? '#4ade5c' : pct > 20 ? '#ffaa33' : '#ff5544';
   fill.style.width = pct + '%';
   fill.style.background = color;
-  num.textContent = Math.round(stamina);
+  num.textContent = Math.round(Stamina.value);
 }
 
 function initMinimap() {
@@ -5350,16 +5361,9 @@ function update() {
   horseAngle += input.turn * turnSpeed * dt;
 
   // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
-  const wantsSprint = !!keys['ShiftLeft'] && input.forward > 0.1 && stamina > 0;
-  isSprinting = wantsSprint;
-  if (isSprinting) {
-    stamina = Math.max(0, stamina - SPRINT_DRAIN_PER_SEC * dt);
-  } else {
-    stamina = Math.min(MAX_STAMINA, stamina + STAMINA_REGEN_PER_SEC * dt);
-  }
+  isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
+  if (isSprinting) Stamina.drain(dt); else Stamina.regen(dt);
   const sprintMult = isSprinting ? SPRINT_MULT : 1.0;
-  // Legacy sprintUntil kept in sync so existing sparkle code activates during sprint
-  sprintUntil = isSprinting ? clock.elapsedTime + 0.05 : sprintUntil;
   if (isSprinting) ensureSprintSparkles();
 
   // Move horse forward/backward — accelerate over time for gallop
@@ -6031,7 +6035,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina, level,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina: Stamina.value, level,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -6196,7 +6200,7 @@ window.startGame = async function () {
     carrots = saved.carrots;
     applesCollected = saved.applesCollected || 0;
     money = saved.money || 0;
-    stamina = saved.stamina != null ? saved.stamina : MAX_STAMINA;
+    Stamina.set(saved.stamina != null ? saved.stamina : MAX_STAMINA);
     if (saved.inventory) {
       inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
     }
