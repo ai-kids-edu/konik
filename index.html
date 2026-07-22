@@ -355,6 +355,11 @@ let horse, horseGroup;
 let clock = new THREE.Clock();
 let carrots = 0;
 let applesCollected = 0;
+let money = 0;
+const CARROT_PRICE = 1;
+const APPLE_PRICE = 2;
+let sellZone = null; // { minX, maxX, minZ, maxZ, cooldown, popup }
+let sellCooldown = 0;
 let level = 1;
 let maxNumber = 5; // starts with 1-5, very slow progression for kindergarten
 let correctAnswers = 0;
@@ -1078,6 +1083,93 @@ function createSouthlands() {
   }
 }
 
+function updateSellZone(dt) {
+  if (!sellZone) return;
+  sellCooldown -= dt;
+  // Pulse beacon based on whether player has stock to sell
+  const hasStock = carrots > 0 || applesCollected > 0;
+  const pulseT = (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
+  sellZone.beacon.material.emissiveIntensity = hasStock ? (0.6 + pulseT * 1.4) : 0.4;
+  sellZone.beacon.scale.setScalar(hasStock ? 1.0 + pulseT * 0.4 : 1.0);
+
+  // Trigger sell when horse enters zone with stock, cooldown prevents rapid re-sell
+  const hx = horsePos.x, hz = horsePos.z;
+  const inZone = hx > sellZone.minX && hx < sellZone.maxX && hz > sellZone.minZ && hz < sellZone.maxZ;
+  if (inZone && hasStock && sellCooldown <= 0) {
+    const earned = carrots * CARROT_PRICE + applesCollected * APPLE_PRICE;
+    money += earned;
+    carrots = 0;
+    applesCollected = 0;
+    sellCooldown = 3;
+    updateCarrotHUD();
+    showSellPopup(earned);
+    spawnCoinBurst(sellZone.counterX, sellZone.counterZ);
+  }
+}
+
+let sellPopupEl = null;
+function showSellPopup(amount) {
+  if (!sellPopupEl) {
+    sellPopupEl = document.createElement('div');
+    sellPopupEl.style.cssText = 'position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);'
+      + 'background:linear-gradient(135deg,#ffcc33,#ff8833);color:#3a1808;'
+      + 'padding:24px 48px;border-radius:24px;font-size:56px;font-weight:900;'
+      + 'text-shadow:2px 2px 0 #fff,-1px -1px 0 #fff;pointer-events:none;'
+      + 'box-shadow:0 8px 30px rgba(0,0,0,0.4);z-index:200;'
+      + 'transition:opacity 0.4s,transform 0.4s;opacity:0;';
+    document.body.appendChild(sellPopupEl);
+  }
+  sellPopupEl.innerHTML = `+${amount} 🪙`;
+  sellPopupEl.style.opacity = '1';
+  sellPopupEl.style.transform = 'translate(-50%,-50%) scale(1.2)';
+  setTimeout(() => {
+    if (sellPopupEl) {
+      sellPopupEl.style.opacity = '0';
+      sellPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    }
+  }, 900);
+}
+
+let coinBurstParticles = [];
+function spawnCoinBurst(cx, cz) {
+  const cy = getTerrainHeight(cx, cz) + 1.2;
+  const coinMat = new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0xff8811, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.7 });
+  for (let i = 0; i < 14; i++) {
+    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.04, 10), coinMat);
+    coin.position.set(cx, cy, cz);
+    coin.rotation.x = Math.PI / 2;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 2;
+    scene.add(coin);
+    coinBurstParticles.push({
+      mesh: coin,
+      vx: Math.cos(angle) * speed,
+      vz: Math.sin(angle) * speed,
+      vy: 4 + Math.random() * 2,
+      life: 1.5,
+    });
+  }
+}
+
+function animateCoinBurst(dt) {
+  for (let i = coinBurstParticles.length - 1; i >= 0; i--) {
+    const p = coinBurstParticles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      coinBurstParticles.splice(i, 1);
+      continue;
+    }
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.z += p.vz * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.vy -= 10 * dt; // gravity
+    p.mesh.rotation.y += 8 * dt;
+    p.mesh.rotation.z += 5 * dt;
+  }
+}
+
 function animateTumbleweeds(dt) {
   for (const tw of tumbleweeds) {
     tw.mesh.position.x += tw.vx * dt;
@@ -1599,6 +1691,105 @@ function buildStore(x, z, side) {
   }
 
   _placeBuilding(group, x, z, side, w, d);
+
+  // Sell counter — placed in front of store (world-space, since buildings rotate)
+  // Front direction: side=-1 → +X, side=+1 → -X
+  const frontDX = (side === -1 ? 1 : -1);
+  const counterX = x + frontDX * (d / 2 + 2.5);
+  const counterZ = z;
+  buildSellCounter(counterX, counterZ, frontDX);
+}
+
+function buildSellCounter(x, z, frontDX) {
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  const woodMat = _mat(0x8b6238, 0.9);
+  const darkWood = _mat(0x5a3a1f, 0.9);
+
+  // Counter table
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.12, 1.0), woodMat);
+  top.position.y = 1.0;
+  top.castShadow = true;
+  group.add(top);
+  // Legs
+  for (const [lx, lz] of [[-1.0, -0.4], [1.0, -0.4], [-1.0, 0.4], [1.0, 0.4]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 0.1), darkWood);
+    leg.position.set(lx, 0.5, lz);
+    group.add(leg);
+  }
+  // Front skirt board
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.08), darkWood);
+  skirt.position.set(0, 0.75, 0.46 * frontDX);
+  group.add(skirt);
+
+  // Coin pile on counter
+  for (let i = 0; i < 4; i++) {
+    const coin = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.12, 0.03, 12),
+      _mat(0xffcc44, 0.35, 0.7)
+    );
+    coin.position.set(0.7, 1.08 + i * 0.03, 0.2);
+    coin.rotation.y = i * 0.4;
+    group.add(coin);
+  }
+
+  // Sign post above counter — canvas "🥕→🪙  🍎→🪙🪙"
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 512; signCanvas.height = 160;
+  const ctx = signCanvas.getContext('2d');
+  ctx.fillStyle = '#3a1d08';
+  ctx.fillRect(0, 0, 512, 160);
+  ctx.strokeStyle = '#f6d990';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(8, 8, 496, 144);
+  ctx.font = 'bold 48px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f6d990';
+  ctx.fillText('SPRZEDAJ', 256, 42);
+  // Row 1: 🥕 = 🪙
+  ctx.font = 'bold 44px Arial';
+  ctx.fillText('🥕 = 🪙', 256, 92);
+  // Row 2: 🍎 = 🪙🪙
+  ctx.fillText('🍎 = 🪙🪙', 256, 138);
+  const signTex = new THREE.CanvasTexture(signCanvas);
+  signTex.colorSpace = THREE.SRGBColorSpace;
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.5, 0.78),
+    new THREE.MeshBasicMaterial({ map: signTex })
+  );
+  sign.position.set(0, 2.4, 0);
+  // Sign faces road (frontDX side)
+  sign.rotation.y = frontDX === 1 ? Math.PI / 2 : -Math.PI / 2;
+  group.add(sign);
+  // Sign posts
+  for (const px of [-1.0, 1.0]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.5, 6), darkWood);
+    post.position.set(px, 1.25, 0);
+    group.add(post);
+  }
+  // Glow beacon on top
+  const beacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0xffaa22, emissiveIntensity: 1.0 })
+  );
+  beacon.position.set(0, 3.0, 0);
+  group.add(beacon);
+  const beaconLight = new THREE.PointLight(0xffcc44, 0.8, 8);
+  beaconLight.position.set(0, 3.0, 0);
+  group.add(beaconLight);
+
+  group.position.set(x, h, z);
+  scene.add(group);
+
+  // Register sell zone — small area in front of counter
+  const zoneR = 2.5;
+  sellZone = {
+    minX: x - zoneR, maxX: x + zoneR,
+    minZ: z - zoneR, maxZ: z + zoneR,
+    counterX: x, counterZ: z,
+    beacon,
+  };
 }
 
 // ----- POST OFFICE: small with mailbox out front, letter on facade -----
@@ -3325,7 +3516,11 @@ function createChallenge() {
     cx = horsePos.x + Math.cos(angle) * dist;
     cz = horsePos.z + Math.sin(angle) * dist;
     // Stay on land, within bounds
-    if (cz > waterStartZ(cx) - 5 || Math.abs(cx) > 85 || cz < -85) continue;
+    if (cz > waterStartZ(cx) - 5 || Math.abs(cx) > 85 || cz < CITY_SOUTH_EDGE + 20) continue;
+    // Keep challenges off the road corridor (kids drive down road, gate blocks path)
+    if (cz < FARM_SOUTH_EDGE && Math.abs(cx) < ROAD_HALF_WIDTH + 8) continue;
+    // Keep out of city building area
+    if (cz < ROAD_SOUTH_EDGE + 10 && Math.abs(cx) < 25) continue;
     // Check that no tree is within 8 units of the challenge center
     const tooClose = treePositions.some(t => {
       const dx = t.x - cx, dz = t.z - cz;
@@ -3344,8 +3539,10 @@ function createChallenge() {
     });
     if (!tooClose && !inFarm && !inStable && !tooCloseToChallenge) break;
   }
-  // Final clamp to keep on land
+  // Final clamp to keep on land + inside world bounds
   if (cz > waterStartZ(cx) - 5) cz = waterStartZ(cx) - 5;
+  if (cz < CITY_SOUTH_EDGE + 20) cz = CITY_SOUTH_EDGE + 20;
+  cx = THREE.MathUtils.clamp(cx, -80, 80);
 
   // Generate math problem
   const problemData = generateProblem();
@@ -3793,6 +3990,7 @@ function updateCarrotHUD() {
   let html = '';
   html += buildCollectRow('🥕', '🥕🥕', '🧺', carrots);        // carrot, bundle of 5, basket of 25
   html += buildCollectRow('🍎', '🍎🍎', '🪣', applesCollected); // apple, bundle of 5, bucket of 25
+  html += buildCollectRow('🪙', '🪙🪙', '💰', money);           // coin, bundle of 5, moneybag of 25
 
   hud.innerHTML = html || '&nbsp;';
 
@@ -4246,6 +4444,8 @@ function update() {
   animateClouds(dt);
   animateBirds(dt);
   animateTumbleweeds(dt);
+  animateCoinBurst(dt);
+  updateSellZone(dt);
   updateCrab(dt);
   updateDalmatian(dt);
   updateCheetah(dt);
@@ -4670,7 +4870,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, level, maxNumber,
+    horseAngle, horseSpeed, carrots, applesCollected, money, level, maxNumber,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -4825,6 +5025,7 @@ window.startGame = async function () {
     horseSpeed = saved.horseSpeed || 0;
     carrots = saved.carrots;
     applesCollected = saved.applesCollected || 0;
+    money = saved.money || 0;
     level = saved.level;
     maxNumber = saved.maxNumber;
     correctAnswers = saved.correctAnswers;
