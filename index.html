@@ -1099,6 +1099,7 @@ function createSouthlands() {
   }
 }
 
+let currentActiveZone = null;
 function updateInteractionZones(dt) {
   sellCooldown -= dt;
   buyCooldown -= dt;
@@ -1111,8 +1112,11 @@ function updateInteractionZones(dt) {
   let active = null;
   let activeDist = Infinity;
   for (const zone of interactionZones) {
+    const wasIn = zone.inZone;
     const inZ = hx > zone.minX && hx < zone.maxX && hz > zone.minZ && hz < zone.maxZ;
     zone.inZone = inZ;
+    // Clear "just bought" sticky flag when horse leaves the zone
+    if (wasIn && !inZ) zone.justBought = false;
     if (inZ) {
       const dx = hx - zone.cx, dz = hz - zone.cz;
       const d2 = dx * dx + dz * dz;
@@ -1133,6 +1137,7 @@ function updateInteractionZones(dt) {
   }
 
   // Popup: driven by nearest active zone
+  currentActiveZone = active;
   updateInteractionPrompt(active);
 }
 
@@ -1179,7 +1184,15 @@ function updateInteractionPrompt(activeZone) {
       : `${it.price} <span style="font-size:56px">🪙</span>`;
     if (owned >= it.max) {
       if (activeZone.itemKey === 'list') {
-        html = `<div style="opacity:0.9">Nie ma teraz nowych<br>listów na poczcie</div>`;
+        // Positive feedback right after pickup — only switches to
+        // "no more letters" when the kid leaves and comes back.
+        if (activeZone.justBought) {
+          html = `<div style="font-size:72px;line-height:1">💌</div>`
+            + `<div style="margin-top:8px;font-size:40px;color:#66ff88">Masz list!</div>`
+            + `<div style="margin-top:8px;font-size:32px;opacity:0.9">Dostarcz go farmerowi<br>na farmie 🚜</div>`;
+        } else {
+          html = `<div style="opacity:0.9">Nie ma teraz nowych<br>listów na poczcie</div>`;
+        }
       } else {
         html = `<div style="opacity:0.9">Masz już <span style="font-size:60px">${it.emoji}</span> ${it.name}!</div>`;
       }
@@ -1242,10 +1255,8 @@ function updateLetterDelivery(dt) {
       money += 1;
       deliveryCooldown = 3;
       updateCarrotHUD();
-      // Farmer waves
-      farmer.waving = true;
-      farmer.waveTime = 0;
-      // Big popup
+      // Big popup — farmer's ambient wave already fires at <6m so no
+      // separate acknowledgment animation is needed here.
       showDeliveryPopup();
       spawnCoinBurst(fp.x, fp.z, 6);
       return;
@@ -1279,15 +1290,18 @@ function showDeliveryPopup() {
 function attemptBuyItem(itemKey) {
   const it = SHOP_ITEMS[itemKey];
   if (!it) return;
-  // Find the active buy zone matching itemKey (must be nearest — but simplest: any inZone match).
+  // Must be inside a buy zone for THIS item and it must be the nearest active zone
+  // (guards against holding S while inside the store sell zone triggering the buy).
   const zone = interactionZones.find(z => z.kind === 'buy' && z.itemKey === itemKey && z.inZone);
   if (!zone) return;
+  if (currentActiveZone && currentActiveZone !== zone) return;
   if (buyCooldown > 0) return;
   if (inventory[itemKey] >= it.max) return;
   if (money < it.price) return;
   money -= it.price;
   inventory[itemKey] += 1;
   buyCooldown = 0.25;
+  zone.justBought = true; // sticky flag until horse leaves the zone
   updateCarrotHUD();
   showBuyPopup(itemKey);
   spawnCoinBurst(zone.counterX, zone.counterZ, 4);
