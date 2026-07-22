@@ -1188,6 +1188,12 @@ function updateInteractionPrompt(activeZone) {
         + `<div style="margin-top:6px;font-size:38px;opacity:0.95">${it.name}</div>`
         + `<div style="margin-top:14px;font-size:36px;color:#ffb0b0">Za mało monet 🪙</div>`
         + `<div style="margin-top:6px;font-size:32px;opacity:0.85">potrzeba <b>${it.price}</b>, masz <b>${money}</b></div>`;
+    } else if (activeZone.itemKey === 'list') {
+      // Quest framing for the letter — it's a delivery job, not a purchase
+      html = `<div style="font-size:72px;line-height:1">💌</div>`
+        + `<div style="margin-top:8px;font-size:40px;color:#ffdd77">Nowy list dla farmera!</div>`
+        + `<div style="margin-top:8px;font-size:32px;opacity:0.9">Weź i dostarcz na farmę,<br>a dostaniesz nagrodę 🪙</div>`
+        + `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span></div>`;
     } else {
       html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
         + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span></div>`
