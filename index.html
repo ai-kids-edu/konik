@@ -1186,7 +1186,7 @@ let sellPromptEl = null;
 function updateInteractionPrompt(activeZone) {
   if (!sellPromptEl) {
     sellPromptEl = document.createElement('div');
-    sellPromptEl.style.cssText = 'position:absolute;top:22%;left:50%;transform:translateX(-50%);'
+    sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;transform:translateX(-50%);'
       + 'background:rgba(0,0,0,0.72);color:#fff;padding:24px 40px;border-radius:24px;'
       + 'font-size:44px;font-weight:800;pointer-events:none;z-index:150;text-align:center;'
       + 'border:4px solid rgba(255,220,120,0.9);box-shadow:0 10px 40px rgba(0,0,0,0.6);'
@@ -1309,7 +1309,7 @@ let deliveryPopupEl = null;
 function showDeliveryPopup() {
   if (!deliveryPopupEl) {
     deliveryPopupEl = document.createElement('div');
-    deliveryPopupEl.style.cssText = 'position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);'
+    deliveryPopupEl.style.cssText = 'position:absolute;top:15%;left:50%;transform:translate(-50%,-50%);'
       + 'background:linear-gradient(135deg,#66cc44,#33aa22);color:#fff;padding:28px 52px;'
       + 'border-radius:28px;font-size:52px;font-weight:900;pointer-events:none;'
       + 'text-shadow:2px 2px 0 rgba(0,0,0,0.4);z-index:210;'
@@ -1388,7 +1388,7 @@ let passengerBubbleEl = null;
 function updatePassengerBubble(farmer) {
   if (!passengerBubbleEl) {
     passengerBubbleEl = document.createElement('div');
-    passengerBubbleEl.style.cssText = 'position:absolute;top:30%;left:50%;transform:translateX(-50%);'
+    passengerBubbleEl.style.cssText = 'position:absolute;top:11%;left:50%;transform:translateX(-50%);'
       + 'background:rgba(20,10,4,0.85);color:#fff;padding:22px 40px;border-radius:20px;'
       + 'font-size:36px;font-weight:800;pointer-events:none;z-index:155;text-align:center;'
       + 'border:4px solid #ffcc33;box-shadow:0 10px 40px rgba(0,0,0,0.6);'
@@ -1506,6 +1506,27 @@ function pulseDestinationMarker(t) {
 }
 
 const PASSENGER_DELIVERY_RADIUS = 12;
+
+let passengerArrivalEl = null;
+function updatePassengerArrivalPrompt(inRange, quest) {
+  if (!passengerArrivalEl) {
+    passengerArrivalEl = document.createElement('div');
+    passengerArrivalEl.style.cssText = 'position:absolute;top:11%;left:50%;transform:translateX(-50%);'
+      + 'background:rgba(20,60,20,0.88);color:#fff;padding:20px 36px;border-radius:22px;'
+      + 'font-size:40px;font-weight:900;pointer-events:none;z-index:160;text-align:center;'
+      + 'border:4px solid #99ff99;box-shadow:0 10px 28px rgba(0,0,0,0.6);'
+      + 'text-shadow:2px 2px 0 rgba(0,0,0,0.5);'
+      + 'transition:opacity 0.2s;opacity:0;';
+    document.body.appendChild(passengerArrivalEl);
+  }
+  if (!inRange || !quest) {
+    passengerArrivalEl.style.opacity = '0';
+    return;
+  }
+  passengerArrivalEl.innerHTML = `<span style="font-size:56px">${quest.destination.emoji}</span> Jesteś na miejscu!<br>`
+    + `<span style="font-size:34px">Naciśnij <span style="background:#f6d990;color:#3a1d08;padding:2px 14px;border-radius:8px;font-family:monospace;font-weight:900">SPACJA</span> żeby wysadzić i dostać ${quest.reward} 🪙</span>`;
+  passengerArrivalEl.style.opacity = '1';
+}
 function completePassengerDelivery(farmer) {
   const q = farmer.quest;
   if (!q) return;
@@ -1539,20 +1560,18 @@ function updatePassengerQuests(dt) {
     if (!f.questMarker) continue;
     f.questMarker.position.y = f.questMarker.userData.baseY + Math.sin(t) * 0.15;
   }
-  // Destination marker: show at destination of the currently-mounted questgiver
+  // Destination marker: show at destination of the currently-mounted questgiver.
+  // Show an in-range prompt so kid knows SPACE will complete the delivery.
   if (ridingFarmer && ridingFarmer.quest) {
     showDestinationMarker(ridingFarmer.quest.destination);
     pulseDestinationMarker(clock.elapsedTime);
-    // Auto-complete delivery when horse enters the destination zone (smooth,
-    // no need to press SPACE — kid was frustrated with tight radius).
     const q = ridingFarmer.quest;
     const dx = horsePos.x - q.destination.x;
     const dz = horsePos.z - q.destination.z;
-    if (Math.sqrt(dx * dx + dz * dz) < PASSENGER_DELIVERY_RADIUS) {
-      completePassengerDelivery(ridingFarmer);
-    }
+    updatePassengerArrivalPrompt(Math.sqrt(dx * dx + dz * dz) < PASSENGER_DELIVERY_RADIUS, q);
   } else {
     hideDestinationMarker();
+    updatePassengerArrivalPrompt(false, null);
   }
   let bubble = null, best = Infinity;
   for (const f of farmers) {
@@ -1571,7 +1590,7 @@ let passengerDeliveryPopupEl = null;
 function showPassengerDeliveryPopup(reward) {
   if (!passengerDeliveryPopupEl) {
     passengerDeliveryPopupEl = document.createElement('div');
-    passengerDeliveryPopupEl.style.cssText = 'position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);'
+    passengerDeliveryPopupEl.style.cssText = 'position:absolute;top:15%;left:50%;transform:translate(-50%,-50%);'
       + 'background:linear-gradient(135deg,#66cc44,#33aa22);color:#fff;padding:28px 52px;'
       + 'border-radius:28px;font-size:52px;font-weight:900;pointer-events:none;'
       + 'text-shadow:2px 2px 0 rgba(0,0,0,0.4);z-index:210;'
@@ -1614,7 +1633,7 @@ let sellPopupEl = null;
 function showSellPopup(amount) {
   if (!sellPopupEl) {
     sellPopupEl = document.createElement('div');
-    sellPopupEl.style.cssText = 'position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);'
+    sellPopupEl.style.cssText = 'position:absolute;top:18%;left:50%;transform:translate(-50%,-50%);'
       + 'background:linear-gradient(135deg,#ffcc33,#ff8833);color:#3a1808;'
       + 'padding:24px 48px;border-radius:24px;font-size:56px;font-weight:900;'
       + 'text-shadow:2px 2px 0 #fff,-1px -1px 0 #fff;pointer-events:none;'
@@ -1638,7 +1657,7 @@ function showBuyPopup(itemKey) {
   const it = SHOP_ITEMS[itemKey];
   if (!buyPopupEl) {
     buyPopupEl = document.createElement('div');
-    buyPopupEl.style.cssText = 'position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);'
+    buyPopupEl.style.cssText = 'position:absolute;top:18%;left:50%;transform:translate(-50%,-50%);'
       + 'background:linear-gradient(135deg,#88ddff,#4488cc);color:#0a2038;'
       + 'padding:24px 48px;border-radius:24px;font-size:56px;font-weight:900;'
       + 'text-shadow:2px 2px 0 #fff,-1px -1px 0 #fff;pointer-events:none;'
@@ -1663,7 +1682,7 @@ let consumePopupEl = null;
 function showConsumePopup(html) {
   if (!consumePopupEl) {
     consumePopupEl = document.createElement('div');
-    consumePopupEl.style.cssText = 'position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);'
+    consumePopupEl.style.cssText = 'position:absolute;top:18%;left:50%;transform:translate(-50%,-50%);'
       + 'background:linear-gradient(135deg,#66cc44,#33aa22);color:#fff;padding:20px 44px;'
       + 'border-radius:24px;font-size:48px;font-weight:900;pointer-events:none;'
       + 'text-shadow:2px 2px 0 rgba(0,0,0,0.4);z-index:210;'
