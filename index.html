@@ -1301,13 +1301,11 @@ function updateLetterDelivery(dt) {
   deliveryCooldown -= dt;
   if (deliveryCooldown > 0) return;
   if (inventory.list < 1) return;
-  // Find closest FARM farmer (position within FARM_RADIUS of farm center) within 4m
+  // Letters go to farm-role people only; townspeople are for passenger rides.
   for (const farmer of farmers) {
     if (farmer.mounted) continue;
+    if (farmer.role !== 'farmer') continue;
     const fp = farmer.group.position;
-    const dfx = fp.x - FARM_X, dfz = fp.z - FARM_Z;
-    const inFarm = Math.sqrt(dfx * dfx + dfz * dfz) < FARM_RADIUS;
-    if (!inFarm) continue;
     const hx = horsePos.x - fp.x, hz = horsePos.z - fp.z;
     if (Math.sqrt(hx * hx + hz * hz) < 4) {
       // Deliver!
@@ -1348,11 +1346,10 @@ function showDeliveryPopup() {
 }
 
 // ========== PASSENGER DELIVERY QUEST ==========
+// Role is tagged at creation (createFarmer vs createTownsperson) — kept as a
+// helper so callers read intent, not the field.
 function isTownsperson(farmer) {
-  const p = farmer.group.position;
-  const dfx = p.x - FARM_X, dfz = p.z - FARM_Z;
-  const inFarm = Math.sqrt(dfx * dfx + dfz * dfz) < FARM_RADIUS;
-  return !inFarm && p.z < ROAD_SOUTH_EDGE;
+  return farmer.role === 'townsperson';
 }
 
 function activePassengerCount() {
@@ -4203,7 +4200,7 @@ function createFarmer(x, z) {
 
   group.scale.set(1.4, 1.4, 1.4);
   scene.add(group);
-  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0 });
+  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0, role: 'farmer' });
 }
 
 // Townsperson — same pickup mechanic as farmer (added to `farmers` array).
@@ -4366,7 +4363,7 @@ function createTownsperson(x, z, faceAngle, type) {
 
   group.scale.set(1.4 * personScale, 1.4 * personScale, 1.4 * personScale);
   scene.add(group);
-  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0 });
+  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0, role: 'townsperson', townType: type });
 }
 
 let animalAnimTime = 0;
