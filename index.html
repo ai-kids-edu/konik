@@ -370,8 +370,16 @@ const SHOP_ITEMS = {
   odznaka: { emoji: '⭐', name: 'Odznaka', key: 'KeyO', keyLabel: 'O', price: 12, max: Infinity, building: 'szeryf' },
   list:    { emoji: '💌', name: 'List',    key: 'KeyL', keyLabel: 'L', price: 0,  max: 1,        building: 'poczta' },
   podkowa: { emoji: '🧲', name: 'Podkowa', key: 'KeyP', keyLabel: 'P', price: 8, max: Infinity, building: 'kowal' },
+  fajerwerki: { emoji: '🎇', name: 'Fajerwerki', key: 'KeyF', keyLabel: 'F', price: 5, max: Infinity, building: 'stragan' },
 };
-let inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0 };
+let inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0 };
+
+// Consumable actions: which HUD key hints to render for inventory items
+const CONSUMABLE_ACTIONS = {
+  siano:      { key: 'Z', verb: 'zjedz' },
+  napoj:      { key: 'W', verb: 'wypij' },
+  fajerwerki: { key: 'F', verb: 'odpal' },
+};
 
 // Registry of all counter zones (sell + buy). Each entry:
 //   { minX, maxX, minZ, maxZ, cx, cz, counterX, counterZ, beacon, kind, itemKey?, inZone }
@@ -415,6 +423,15 @@ let horseSpeed = 0;
 const BASE_SPEED = 8;
 const MAX_SPEED = 14;
 let currentMaxSpeed = BASE_SPEED;
+// Jump physics (E key)
+let isJumping = false;
+let jumpVy = 0;
+// Sprint (W consume) — wall-clock timestamp until which the horse gets a speed boost
+let sprintUntil = 0;
+// Sparkle particles orbiting the horse during sprint (lazy-created)
+let sprintSparkles = [];
+// Firework burst particles (fajerwerki consume)
+let fireworkParticles = [];
 let runTimer = 0; // how long we've been running continuously
 let walkTime = 0;
 let legMeshes = [];
@@ -462,6 +479,7 @@ const PASSENGER_DESTINATIONS = [
   { name: 'do kowala',   hudName: 'kowal',  emoji: '🧲', x: 12,     z: CITY_CENTER_Z - 20 },
   { name: 'do banku',    hudName: 'bank',   emoji: '💎', x: -12,    z: CITY_CENTER_Z - 22 },
   { name: 'na pocztę',   hudName: 'poczta', emoji: '💌', x: 12,     z: CITY_CENTER_Z - 2 },
+  { name: 'na stragan',  hudName: 'stragan', emoji: '🎇', x: 45,     z: -180 },
 ];
 
 // ========== COORDINATE CONVENTION ==========
@@ -711,6 +729,8 @@ function initScene() {
   // South zones — Wild West outskirts & town
   createSouthlands();
   createWildWestTown();
+  // Prairie trading stall (fajerwerki) — off to the side of the road
+  buildTradingStand(45, -180);
 }
 
 function brightenModel(model, factor = 2.0) {
@@ -1425,11 +1445,114 @@ function updatePassengerHudIndicator() {
   }
 }
 
+let destinationMarker = null; // { group, ringMat, arrowMesh } — shown at target while riding
+function ensureDestinationMarker() {
+  if (destinationMarker) return destinationMarker;
+  const group = new THREE.Group();
+  // Ground ring — big glowing green so kid spots it from far
+  const ringGeo = new THREE.RingGeometry(2.2, 3.2, 32);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x33ee55, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false,
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.05;
+  group.add(ring);
+  // Inner filled disc, slightly darker
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(2.2, 24),
+    new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false })
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = 0.03;
+  group.add(disc);
+  // Downward arrow floating above the ring
+  const arrowMat = new THREE.MeshStandardMaterial({ color: 0x33ee55, emissive: 0x33dd55, emissiveIntensity: 0.9, roughness: 0.4 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.2, 8), arrowMat);
+  shaft.position.y = 5;
+  group.add(shaft);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.2, 12), arrowMat);
+  head.position.y = 3.8;
+  head.rotation.x = Math.PI; // point down
+  group.add(head);
+  // Light so it glows in fog
+  const beacon = new THREE.PointLight(0x66ff88, 1.2, 12);
+  beacon.position.y = 3;
+  group.add(beacon);
+  group.visible = false;
+  scene.add(group);
+  destinationMarker = { group, ringMat, arrowGroup: [shaft, head] };
+  return destinationMarker;
+}
+function showDestinationMarker(dest) {
+  const m = ensureDestinationMarker();
+  const h = getTerrainHeight(dest.x, dest.z);
+  m.group.position.set(dest.x, h, dest.z);
+  m.group.visible = true;
+}
+function hideDestinationMarker() {
+  if (!destinationMarker) return;
+  destinationMarker.group.visible = false;
+}
+function pulseDestinationMarker(t) {
+  if (!destinationMarker || !destinationMarker.group.visible) return;
+  const s = 1 + Math.sin(t * 3) * 0.08;
+  destinationMarker.group.scale.set(s, 1, s);
+  destinationMarker.ringMat.opacity = 0.55 + (Math.sin(t * 3) + 1) * 0.15;
+  // Bob arrow
+  const bob = Math.sin(t * 4) * 0.25;
+  destinationMarker.arrowGroup[0].position.y = 5 + bob;
+  destinationMarker.arrowGroup[1].position.y = 3.8 + bob;
+}
+
+const PASSENGER_DELIVERY_RADIUS = 12;
+function completePassengerDelivery(farmer) {
+  const q = farmer.quest;
+  if (!q) return;
+  // Detach passenger from horse if still mounted; place at destination
+  if (farmer.mounted) {
+    horseGroup.remove(farmer.group);
+    scene.add(farmer.group);
+    farmer.group.scale.set(1.4, 1.4, 1.4);
+    farmer.mounted = false;
+    if (ridingFarmer === farmer) ridingFarmer = null;
+  }
+  const destH = getTerrainHeight(q.destination.x, q.destination.z);
+  farmer.group.position.set(q.destination.x, destH, q.destination.z);
+  const reward = q.reward;
+  money += reward;
+  showPassengerDeliveryPopup(reward);
+  spawnCoinBurst(q.destination.x, q.destination.z, 8);
+  if (farmer.questMarker) {
+    farmer.group.remove(farmer.questMarker);
+    farmer.questMarker = null;
+  }
+  farmer.quest = null;
+  hideDestinationMarker();
+  updateCarrotHUD();
+  assignNewPassengerQuest();
+}
+
 function updatePassengerQuests(dt) {
   const t = clock.elapsedTime * 6;
   for (const f of farmers) {
     if (!f.questMarker) continue;
     f.questMarker.position.y = f.questMarker.userData.baseY + Math.sin(t) * 0.15;
+  }
+  // Destination marker: show at destination of the currently-mounted questgiver
+  if (ridingFarmer && ridingFarmer.quest) {
+    showDestinationMarker(ridingFarmer.quest.destination);
+    pulseDestinationMarker(clock.elapsedTime);
+    // Auto-complete delivery when horse enters the destination zone (smooth,
+    // no need to press SPACE — kid was frustrated with tight radius).
+    const q = ridingFarmer.quest;
+    const dx = horsePos.x - q.destination.x;
+    const dz = horsePos.z - q.destination.z;
+    if (Math.sqrt(dx * dx + dz * dz) < PASSENGER_DELIVERY_RADIUS) {
+      completePassengerDelivery(ridingFarmer);
+    }
+  } else {
+    hideDestinationMarker();
   }
   let bubble = null, best = Infinity;
   for (const f of farmers) {
@@ -1532,6 +1655,149 @@ function showBuyPopup(itemKey) {
       buyPopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
     }
   }, 900);
+}
+
+// ===== Consumable actions (E jump / Z siano / W napoj / F fajerwerki) =====
+
+let consumePopupEl = null;
+function showConsumePopup(html) {
+  if (!consumePopupEl) {
+    consumePopupEl = document.createElement('div');
+    consumePopupEl.style.cssText = 'position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);'
+      + 'background:linear-gradient(135deg,#66cc44,#33aa22);color:#fff;padding:20px 44px;'
+      + 'border-radius:24px;font-size:48px;font-weight:900;pointer-events:none;'
+      + 'text-shadow:2px 2px 0 rgba(0,0,0,0.4);z-index:210;'
+      + 'box-shadow:0 10px 32px rgba(0,0,0,0.5);border:4px solid #fff;'
+      + 'transition:opacity 0.35s,transform 0.35s;opacity:0;text-align:center;';
+    document.body.appendChild(consumePopupEl);
+  }
+  consumePopupEl.innerHTML = html;
+  consumePopupEl.style.opacity = '1';
+  consumePopupEl.style.transform = 'translate(-50%,-50%) scale(1.1)';
+  setTimeout(() => {
+    if (consumePopupEl) {
+      consumePopupEl.style.opacity = '0';
+      consumePopupEl.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    }
+  }, 1400);
+}
+
+function attemptJump() {
+  if (isJumping) return;
+  isJumping = true;
+  jumpVy = 6;
+  // Play the horse's gallop_jump animation (~0.9s); return to idle after.
+  playHorseAnimation('gallop_jump', 900);
+}
+
+function attemptEatHay() {
+  if ((inventory.siano || 0) <= 0) return;
+  inventory.siano -= 1;
+  carrots += 1;
+  updateCarrotHUD();
+  showConsumePopup('<span style="font-size:60px">🥕</span> +1!');
+  // Brief eating anim — mirrors the apple-eat behavior
+  playHorseAnimation('eating', 1200);
+  isEatingCarrots = true;
+  setTimeout(() => { isEatingCarrots = false; }, 1200);
+}
+
+function attemptDrinkWater() {
+  if ((inventory.napoj || 0) <= 0) return;
+  inventory.napoj -= 1;
+  sprintUntil = clock.elapsedTime + 10;
+  ensureSprintSparkles();
+  updateCarrotHUD();
+  showConsumePopup('Sprint! <span style="font-size:60px">🏇💨</span>');
+}
+
+function consumeFajerwerki() {
+  if ((inventory.fajerwerki || 0) <= 0) return;
+  inventory.fajerwerki -= 1;
+  spawnFireworkBurst(horsePos.x, horsePos.y + 6, horsePos.z);
+  updateCarrotHUD();
+  showConsumePopup('<span style="font-size:60px">🎇</span> BUM!');
+}
+
+// Sprint sparkles — created lazily first time we sprint, then hidden/shown.
+function ensureSprintSparkles() {
+  if (sprintSparkles.length > 0) return;
+  const sparkleMat = new THREE.MeshStandardMaterial({
+    color: 0xffdd44, emissive: 0xffaa22, emissiveIntensity: 0.8, roughness: 0.4,
+  });
+  for (let i = 0; i < 12; i++) {
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.1), sparkleMat);
+    mesh.visible = false;
+    scene.add(mesh);
+    sprintSparkles.push({
+      mesh,
+      angle: (i / 12) * Math.PI * 2,
+      angularSpeed: 2.2 + Math.random() * 0.8,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
+function animateSprintSparkles(dt) {
+  const active = clock.elapsedTime < sprintUntil;
+  for (const s of sprintSparkles) {
+    if (!active) {
+      if (s.mesh.visible) s.mesh.visible = false;
+      continue;
+    }
+    s.mesh.visible = true;
+    s.angle += s.angularSpeed * dt;
+    s.mesh.position.x = horsePos.x + Math.cos(s.angle) * 1.5;
+    s.mesh.position.y = horsePos.y + 1 + Math.sin(s.phase + clock.elapsedTime * 3) * 0.3;
+    s.mesh.position.z = horsePos.z + Math.sin(s.angle) * 1.5;
+    s.mesh.rotation.x += dt * 3;
+    s.mesh.rotation.y += dt * 4;
+  }
+}
+
+// Firework burst — radial upward-biased hemisphere of small colored spheres.
+function spawnFireworkBurst(x, y, z) {
+  const colors = [0xff4444, 0xffaa44, 0x44ff44, 0x44ccff, 0xff44ff];
+  for (let i = 0; i < 20; i++) {
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const mat = new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 0.9, roughness: 0.3, transparent: true, opacity: 1,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), mat);
+    mesh.position.set(x, y, z);
+    const a = Math.random() * Math.PI * 2;
+    // phi ∈ [0, PI/2] — upper hemisphere
+    const phi = Math.random() * Math.PI / 2;
+    const speed = 5 + Math.random() * 3;
+    scene.add(mesh);
+    fireworkParticles.push({
+      mesh,
+      vx: Math.cos(a) * Math.sin(phi) * speed,
+      vy: Math.cos(phi) * speed + 3,
+      vz: Math.sin(a) * Math.sin(phi) * speed,
+      life: 1.2,
+      maxLife: 1.2,
+    });
+  }
+}
+
+function animateFireworks(dt) {
+  for (let i = fireworkParticles.length - 1; i >= 0; i--) {
+    const p = fireworkParticles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+      fireworkParticles.splice(i, 1);
+      continue;
+    }
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.mesh.position.z += p.vz * dt;
+    p.vy -= 10 * dt; // gravity
+    p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
+  }
 }
 
 let coinBurstParticles = [];
@@ -2413,8 +2679,69 @@ function buildBuyCounterDisplay(itemKey) {
     shoe.rotation.x = -Math.PI / 2;
     shoe.position.y = 0.05;
     g.add(shoe);
+  } else if (itemKey === 'fajerwerki') {
+    // Small rocket display: cone tip on a stubby cylinder body
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.25, 8),
+      new THREE.MeshStandardMaterial({ color: 0xcc3322, roughness: 0.6 })
+    );
+    body.position.y = 0.125;
+    g.add(body);
+    const tip = new THREE.Mesh(
+      new THREE.ConeGeometry(0.06, 0.12, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0xff8800, emissiveIntensity: 0.5, roughness: 0.4 })
+    );
+    tip.position.y = 0.31;
+    g.add(tip);
   }
   return g;
+}
+
+// Small prairie stragan (trading stall) — decorated buy counter selling fajerwerki.
+// Kids find it while exploring off-road on the prairie.
+function buildTradingStand(x, z, itemKey = 'fajerwerki') {
+  // Counter faces west (toward the road) — frontDX = -1
+  const frontDX = -1;
+  buildBuyCounter(x, z, frontDX, itemKey);
+
+  // Decoration: two vertical posts + slanted red-and-cream striped canvas roof
+  // over the counter. Purely visual — sits on top of the buy counter geometry.
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  const woodMat = _mat(0x8a6238, 0.9);
+  const stripeMats = [
+    _mat(0xcc3322, 0.85),
+    _mat(0xf6ecd0, 0.85),
+  ];
+
+  // Two vertical posts flanking the counter
+  for (const px of [-1.4, 1.4]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 8), woodMat);
+    post.position.set(px, 1.7, -0.9 * frontDX);
+    group.add(post);
+  }
+
+  // Slanted striped canvas roof — 5 stripes alternating red and cream
+  const roofWidth = 3.2;
+  const roofDepth = 2.2;
+  const stripeCount = 5;
+  const stripeH = roofDepth / stripeCount;
+  const roofPivot = new THREE.Group();
+  for (let i = 0; i < stripeCount; i++) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(roofWidth, 0.05, stripeH),
+      stripeMats[i % 2]
+    );
+    stripe.position.set(0, 0, -roofDepth / 2 + stripeH * (i + 0.5));
+    roofPivot.add(stripe);
+  }
+  // Slant the roof down toward the front (customer side)
+  roofPivot.rotation.x = -0.25 * frontDX;
+  roofPivot.position.set(0, 3.35, -0.9 * frontDX);
+  group.add(roofPivot);
+
+  group.position.set(x, h, z);
+  scene.add(group);
 }
 
 // ----- POST OFFICE: small with mailbox out front, letter on facade -----
@@ -4510,6 +4837,18 @@ function initInput() {
       if (e.code === 'KeyO') attemptBuyItem('odznaka');
       if (e.code === 'KeyL') attemptBuyItem('list');
       if (e.code === 'KeyP') attemptBuyItem('podkowa');
+      // New consumable-action keys
+      if (e.code === 'KeyE') attemptJump();
+      if (e.code === 'KeyZ') attemptEatHay();
+      // W is a movement key too — this only fires on fresh press to consume napoj
+      if (e.code === 'KeyW') attemptDrinkWater();
+      // F: buy fajerwerki when inside its buy zone, else consume from inventory
+      if (e.code === 'KeyF') {
+        const inBuyZone = interactionZones.some(z =>
+          z.kind === 'buy' && z.itemKey === 'fajerwerki' && z.inZone);
+        if (inBuyZone) attemptBuyItem('fajerwerki');
+        else if ((inventory.fajerwerki || 0) > 0) consumeFajerwerki();
+      }
     }
     if (e.code === 'Escape') resetGame();
   });
@@ -4631,7 +4970,15 @@ function updateCarrotHUD() {
   const hud = document.getElementById('collect-hud');
   if (!hud) return;
 
-  let html = '';
+  // Persistent tiny hint row: [E] skok — always visible so kids discover the jump.
+  const smallKeyStyle = 'display:inline-block;background:#f6d990;color:#3a1d08;'
+    + 'padding:1px 8px;border-radius:6px;font-family:monospace;font-size:22px;'
+    + 'font-weight:900;box-shadow:0 2px 0 #b89040;vertical-align:middle;';
+  let html = `<div class="row" style="font-size:22px;line-height:1;display:flex;align-items:center;gap:6px;color:#f6ecd0;text-shadow:1px 1px 0 rgba(0,0,0,0.5);opacity:0.95">`
+    + `<span style="${smallKeyStyle};color:${handColor('E')}">E</span>`
+    + `<span>skok</span>`
+    + `</div>`;
+
   html += buildCollectRow('🥕', carrots);
   html += buildCollectRow('🍎', applesCollected);
   // Money: always shown as big number in its own row (kid reads exact coin count)
@@ -4640,14 +4987,26 @@ function updateCarrotHUD() {
     + `<span style="color:#ffd944;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${money}</span>`
     + `</div>`;
 
-  // Inventory: one row per item, same emoji × N formatting for consistency
+  // Consumable action-key badge style — smaller than shop-prompt kbd, tinted by hand color.
+  const badgeStyle = 'display:inline-block;background:#f6ecd0;color:#3a1d08;'
+    + 'padding:2px 10px;border-radius:8px;font-family:monospace;font-size:28px;'
+    + 'font-weight:900;box-shadow:0 2px 0 #b89040;vertical-align:middle;';
+
+  // Inventory: one row per item, same emoji × N formatting for consistency.
+  // Consumable items also get a key hint on the same row.
   for (const k of Object.keys(SHOP_ITEMS)) {
     const n = inventory[k] || 0;
     if (n > 0) {
-      html += `<div class="row" style="font-size:36px;font-weight:800;line-height:1.1;display:flex;align-items:center;gap:8px">`
+      let row = `<div class="row" style="font-size:36px;font-weight:800;line-height:1.1;display:flex;align-items:center;gap:8px">`
         + `<span style="font-size:44px">${SHOP_ITEMS[k].emoji}</span>`
-        + `<span style="color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${n}</span>`
-        + `</div>`;
+        + `<span style="color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${n}</span>`;
+      const action = CONSUMABLE_ACTIONS[k];
+      if (action) {
+        row += `<span style="${badgeStyle};border:2px solid ${handColor(action.key)}">${action.key}</span>`
+          + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`;
+      }
+      row += `</div>`;
+      html += row;
     }
   }
 
@@ -4853,8 +5212,8 @@ function animateHorse(dt, moving) {
     targetGait = 'walk';
   }
 
-  // Don't override eating animation
-  if (!isEatingCarrots) {
+  // Don't override eating or jumping animation
+  if (!isEatingCarrots && !isJumping) {
     switchHorseAnim(targetGait);
   }
 
@@ -4876,12 +5235,13 @@ function handleSpaceAction() {
     let dropX = horsePos.x - Math.sin(horseAngle) * 2 + Math.cos(horseAngle) * 2;
     let dropZ = horsePos.z - Math.cos(horseAngle) * 2 - Math.sin(horseAngle) * 2;
 
-    // Delivery check — passenger quest
+    // Delivery check — passenger quest (12m radius — farm animals etc. cluster
+    // around FARM_X/FARM_Z so kid parks at edge, still counts as arrival).
     let delivered = false;
     if (farmer.quest) {
       const dx = horsePos.x - farmer.quest.destination.x;
       const dz = horsePos.z - farmer.quest.destination.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 6) {
+      if (Math.sqrt(dx * dx + dz * dz) < 12) {
         delivered = true;
         dropX = farmer.quest.destination.x;
         dropZ = farmer.quest.destination.z;
@@ -4947,12 +5307,14 @@ function update() {
   horseAngle += input.turn * turnSpeed * dt;
 
   // Move horse forward/backward — accelerate over time for gallop
+  const sprintMult = clock.elapsedTime < sprintUntil ? 1.5 : 1.0;
   if (Math.abs(input.forward) > 0.1) {
     runTimer += dt;
     // After 1.5s of running, gradually increase max speed up to MAX_SPEED
     const gallopT = THREE.MathUtils.clamp((runTimer - 1.5) / 3.0, 0, 1);
     currentMaxSpeed = THREE.MathUtils.lerp(BASE_SPEED, MAX_SPEED, gallopT);
-    horseSpeed = THREE.MathUtils.lerp(horseSpeed, currentMaxSpeed * input.forward, dt * 5);
+    const targetSpeed = currentMaxSpeed * sprintMult * input.forward;
+    horseSpeed = THREE.MathUtils.lerp(horseSpeed, targetSpeed, dt * 5);
   } else {
     runTimer = 0;
     currentMaxSpeed = BASE_SPEED;
@@ -5025,9 +5387,23 @@ function update() {
     horseSpeed *= slowFactor;
   }
 
-  // Set horse height to follow terrain
+  // Set horse height to follow terrain — unless we're mid-jump
   const terrainY = getTerrainHeight(horsePos.x, horsePos.z);
-  horsePos.y = Math.max(terrainY, WATER_LEVEL);
+  if (isJumping) {
+    horsePos.y += jumpVy * dt;
+    jumpVy -= 15 * dt;
+    const groundY = Math.max(terrainY, WATER_LEVEL);
+    if (horsePos.y <= groundY && jumpVy <= 0) {
+      horsePos.y = groundY;
+      isJumping = false;
+      jumpVy = 0;
+      // Force animateHorse to re-select gait next frame — playHorseAnimation
+      // fades gallop_jump to idle, but lastHorseGait may still say 'gallop'.
+      lastHorseGait = '';
+    }
+  } else {
+    horsePos.y = Math.max(terrainY, WATER_LEVEL);
+  }
 
   // Update horse transform — force position from terrain, not from animation
   horseGroup.position.copy(horsePos);
@@ -5130,6 +5506,8 @@ function update() {
   animateBirds(dt);
   animateTumbleweeds(dt);
   animateCoinBurst(dt);
+  animateFireworks(dt);
+  animateSprintSparkles(dt);
   updateInteractionZones(dt);
   updateLetterDelivery(dt);
   updatePassengerQuests(dt);
@@ -5723,7 +6101,7 @@ window.startGame = async function () {
     applesCollected = saved.applesCollected || 0;
     money = saved.money || 0;
     if (saved.inventory) {
-      inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, ...saved.inventory };
+      inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
     }
     level = saved.level;
     maxNumber = saved.maxNumber;
