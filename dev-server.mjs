@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const PORT = 3333;
+const PORT = Number(process.env.PORT) || 3333;
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const mimeTypes = {
