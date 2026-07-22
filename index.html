@@ -1086,25 +1086,75 @@ function createSouthlands() {
 function updateSellZone(dt) {
   if (!sellZone) return;
   sellCooldown -= dt;
-  // Pulse beacon based on whether player has stock to sell
   const hasStock = carrots > 0 || applesCollected > 0;
   const pulseT = (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
-  sellZone.beacon.material.emissiveIntensity = hasStock ? (0.6 + pulseT * 1.4) : 0.4;
-  sellZone.beacon.scale.setScalar(hasStock ? 1.0 + pulseT * 0.4 : 1.0);
-
-  // Trigger sell when horse enters zone with stock, cooldown prevents rapid re-sell
   const hx = horsePos.x, hz = horsePos.z;
   const inZone = hx > sellZone.minX && hx < sellZone.maxX && hz > sellZone.minZ && hz < sellZone.maxZ;
-  if (inZone && hasStock && sellCooldown <= 0) {
-    const earned = carrots * CARROT_PRICE + applesCollected * APPLE_PRICE;
-    money += earned;
-    carrots = 0;
-    applesCollected = 0;
-    sellCooldown = 3;
-    updateCarrotHUD();
-    showSellPopup(earned);
-    spawnCoinBurst(sellZone.counterX, sellZone.counterZ);
+  sellZone.inZone = inZone;
+
+  // Beacon pulses only when in zone with stock — cue that action is possible
+  const cueActive = inZone && hasStock;
+  sellZone.beacon.material.emissiveIntensity = cueActive ? (0.6 + pulseT * 1.4) : 0.35;
+  sellZone.beacon.scale.setScalar(cueActive ? 1.0 + pulseT * 0.4 : 1.0);
+
+  // Prompt overlay
+  updateSellPrompt(inZone, hasStock);
+}
+
+let sellPromptEl = null;
+function updateSellPrompt(inZone, hasStock) {
+  if (!sellPromptEl) {
+    sellPromptEl = document.createElement('div');
+    sellPromptEl.style.cssText = 'position:absolute;top:22%;left:50%;transform:translateX(-50%);'
+      + 'background:rgba(0,0,0,0.72);color:#fff;padding:24px 40px;border-radius:24px;'
+      + 'font-size:44px;font-weight:800;pointer-events:none;z-index:150;text-align:center;'
+      + 'border:4px solid rgba(255,220,120,0.9);box-shadow:0 10px 40px rgba(0,0,0,0.6);'
+      + 'transition:opacity 0.2s;opacity:0;line-height:1.4;'
+      + 'text-shadow:2px 2px 0 rgba(0,0,0,0.6);'
+      + 'font-family:\"Segoe UI\",Tahoma,sans-serif;max-width:90vw;';
+    document.body.appendChild(sellPromptEl);
   }
+  if (!inZone) {
+    sellPromptEl.style.opacity = '0';
+    return;
+  }
+  const kbdStyle = 'display:inline-block;background:#f6d990;color:#3a1d08;'
+    + 'padding:4px 18px;border-radius:10px;font-family:monospace;'
+    + 'font-size:52px;font-weight:900;margin:0 8px;'
+    + 'text-shadow:none;box-shadow:0 3px 0 #b89040,inset 0 -3px 0 rgba(0,0,0,0.15);'
+    + 'vertical-align:middle;';
+  let html = '';
+  if (!hasStock) {
+    html = '<div style="opacity:0.85">Nazbieraj <span style="font-size:60px">🥕</span> lub <span style="font-size:60px">🍎</span><br>i wróć tutaj sprzedać!</div>';
+  } else {
+    if (carrots > 0) {
+      html += `<div>Naciśnij <span style="${kbdStyle}">M</span> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
+    }
+    if (applesCollected > 0) {
+      html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
+    }
+  }
+  sellPromptEl.innerHTML = html;
+  sellPromptEl.style.opacity = '1';
+}
+
+function attemptSellItem(kind) {
+  if (!sellZone || !sellZone.inZone) return;
+  if (sellCooldown > 0) return;
+  let earned = 0;
+  if (kind === 'carrot' && carrots > 0) {
+    carrots--;
+    earned = CARROT_PRICE;
+  } else if (kind === 'apple' && applesCollected > 0) {
+    applesCollected--;
+    earned = APPLE_PRICE;
+  }
+  if (earned === 0) return;
+  money += earned;
+  sellCooldown = 0.18; // repeat rate — kid can hold key
+  updateCarrotHUD();
+  showSellPopup(earned);
+  spawnCoinBurst(sellZone.counterX, sellZone.counterZ, 4);
 }
 
 let sellPopupEl = null;
@@ -1131,10 +1181,10 @@ function showSellPopup(amount) {
 }
 
 let coinBurstParticles = [];
-function spawnCoinBurst(cx, cz) {
+function spawnCoinBurst(cx, cz, count = 14) {
   const cy = getTerrainHeight(cx, cz) + 1.2;
   const coinMat = new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0xff8811, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.7 });
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < count; i++) {
     const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.04, 10), coinMat);
     coin.position.set(cx, cy, cz);
     coin.rotation.x = Math.PI / 2;
@@ -1733,39 +1783,50 @@ function buildSellCounter(x, z, frontDX) {
     group.add(coin);
   }
 
-  // Sign post above counter — canvas "🥕→🪙  🍎→🪙🪙"
+  // Sign post above counter — canvas "M: 🥕→🪙  J: 🍎→🪙🪙"
   const signCanvas = document.createElement('canvas');
-  signCanvas.width = 512; signCanvas.height = 160;
+  signCanvas.width = 640; signCanvas.height = 200;
   const ctx = signCanvas.getContext('2d');
   ctx.fillStyle = '#3a1d08';
-  ctx.fillRect(0, 0, 512, 160);
+  ctx.fillRect(0, 0, 640, 200);
   ctx.strokeStyle = '#f6d990';
   ctx.lineWidth = 6;
-  ctx.strokeRect(8, 8, 496, 144);
-  ctx.font = 'bold 48px Arial';
+  ctx.strokeRect(8, 8, 624, 184);
+  ctx.font = 'bold 42px Arial';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#f6d990';
-  ctx.fillText('SPRZEDAJ', 256, 42);
-  // Row 1: 🥕 = 🪙
-  ctx.font = 'bold 44px Arial';
-  ctx.fillText('🥕 = 🪙', 256, 92);
-  // Row 2: 🍎 = 🪙🪙
-  ctx.fillText('🍎 = 🪙🪙', 256, 138);
+  ctx.fillText('SPRZEDAJ', 320, 34);
+  // Row 1: [M] 🥕 = 🪙
+  ctx.font = 'bold 48px Arial';
+  // Key badge M
+  ctx.fillStyle = '#f6d990';
+  ctx.fillRect(72, 68, 68, 60);
+  ctx.fillStyle = '#3a1d08';
+  ctx.fillText('M', 106, 100);
+  ctx.fillStyle = '#f6d990';
+  ctx.fillText('🥕 = 🪙', 380, 100);
+  // Row 2: [J] 🍎 = 🪙🪙
+  ctx.fillStyle = '#f6d990';
+  ctx.fillRect(72, 138, 68, 60);
+  ctx.fillStyle = '#3a1d08';
+  ctx.fillText('J', 106, 170);
+  ctx.fillStyle = '#f6d990';
+  ctx.fillText('🍎 = 🪙🪙', 380, 170);
   const signTex = new THREE.CanvasTexture(signCanvas);
   signTex.colorSpace = THREE.SRGBColorSpace;
   const sign = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.5, 0.78),
+    new THREE.PlaneGeometry(3.0, 0.94),
     new THREE.MeshBasicMaterial({ map: signTex })
   );
-  sign.position.set(0, 2.4, 0);
+  sign.position.set(0, 2.5, 0);
   // Sign faces road (frontDX side)
   sign.rotation.y = frontDX === 1 ? Math.PI / 2 : -Math.PI / 2;
   group.add(sign);
   // Sign posts
-  for (const px of [-1.0, 1.0]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.5, 6), darkWood);
-    post.position.set(px, 1.25, 0);
+  for (const px of [-1.2, 1.2]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6), darkWood);
+    post.position.set(px, 1.3, 0);
     group.add(post);
   }
   // Glow beacon on top
@@ -3866,6 +3927,8 @@ function initInput() {
   window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
     if (e.code === 'Space') handleSpaceAction();
+    if (e.code === 'KeyM') attemptSellItem('carrot');
+    if (e.code === 'KeyJ') attemptSellItem('apple');
     if (e.code === 'Escape') resetGame();
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
