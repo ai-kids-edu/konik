@@ -1371,6 +1371,11 @@ function assignNewPassengerQuest() {
     const candidates = farmers.filter(f => isTownsperson(f) && !f.quest && !f.mounted);
     if (candidates.length === 0) break;
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    // Remember where this townsperson lives so they can be brought back later.
+    if (pick.homeX == null) {
+      pick.homeX = pick.group.position.x;
+      pick.homeZ = pick.group.position.z;
+    }
     const dests = PASSENGER_DESTINATIONS.filter(d => {
       const dx = pick.group.position.x - d.x;
       const dz = pick.group.position.z - d.z;
@@ -1381,6 +1386,31 @@ function assignNewPassengerQuest() {
     pick.quest = { destination: dest, reward };
     pick.questMarker = createPassengerMarker();
     pick.group.add(pick.questMarker);
+  }
+}
+
+// After a passenger has been dropped away from town for RETURN_DELAY seconds,
+// they generate a "take me home" quest so the town doesn't slowly empty out.
+const RETURN_DELAY_SECONDS = 60;
+function updateReturnQuests() {
+  for (const f of farmers) {
+    if (f.quest) continue;
+    if (f.mounted) continue;
+    if (!f.awayAt) continue;
+    if (f.homeX == null) continue;
+    if (clock.elapsedTime - f.awayAt < RETURN_DELAY_SECONDS) continue;
+    const dest = {
+      name: 'do miasteczka',
+      hudName: 'miasteczko',
+      emoji: '🏘️',
+      x: f.homeX,
+      z: f.homeZ,
+    };
+    const reward = 2 + Math.floor(Math.random() * 2);
+    f.quest = { destination: dest, reward, isReturn: true };
+    f.questMarker = createPassengerMarker();
+    f.group.add(f.questMarker);
+    f.awayAt = 0;
   }
 }
 
@@ -1548,13 +1578,18 @@ function completePassengerDelivery(farmer) {
     farmer.group.remove(farmer.questMarker);
     farmer.questMarker = null;
   }
+  const wasReturn = q.isReturn;
   farmer.quest = null;
+  // If we just brought them home, they're back — no return-timer.
+  // Otherwise, start the timer that eventually gives them a "take me home" quest.
+  farmer.awayAt = wasReturn ? 0 : clock.elapsedTime;
   hideDestinationMarker();
   updateCarrotHUD();
   assignNewPassengerQuest();
 }
 
 function updatePassengerQuests(dt) {
+  updateReturnQuests();
   const t = clock.elapsedTime * 6;
   for (const f of farmers) {
     if (!f.questMarker) continue;
