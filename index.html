@@ -384,8 +384,7 @@ const CONSUMABLE_ACTIONS = {
 // Registry of all counter zones (sell + buy). Each entry:
 //   { minX, maxX, minZ, maxZ, cx, cz, counterX, counterZ, beacon, kind, itemKey?, inZone }
 let interactionZones = [];
-let level = 1;
-let maxNumber = 5; // starts with 1-5, very slow progression for kindergarten
+let level = 1; // the only difficulty state; the rest derives via levelRules()
 let correctAnswers = 0;
 let totalAnswers = 0;
 
@@ -4701,7 +4700,7 @@ function createChallenge() {
 
     // Answer display — dots at level 1, numbers later
     const ansVal = answers[i];
-    const showDots = level <= 3 && ansVal <= 10;
+    const showDots = levelRules().useVisual && ansVal <= 10;
     const ansCanvas = document.createElement('canvas');
     ansCanvas.width = 128;
     ansCanvas.height = 128;
@@ -4802,24 +4801,21 @@ function createChallenge() {
 const DOT_COLORS = ['#ff5555', '#5599ff', '#ffaa22', '#55cc55', '#cc55ff', '#ff55aa'];
 
 function generateProblem() {
-  // Level 1 (maxNumber=5): only addition
-  // Level 2+ (maxNumber>=7): mix addition and subtraction
-  const canSubtract = maxNumber >= 7;
-  const type = (canSubtract && Math.random() < 0.4) ? 'sub' : 'add';
+  const rules = levelRules();
+  const maxNum = rules.maxNum;
+  const type = (rules.canSubtract && Math.random() < 0.4) ? 'sub' : 'add';
 
-  // Visual dots at low levels, mix in numbers later
-  // Dots for levels 1-3, numbers from level 4+
-  const useVisual = level <= 3;
+  const useVisual = rules.useVisual;
   const dotColor = DOT_COLORS[Math.floor(Math.random() * DOT_COLORS.length)];
   let a, b, answer;
 
   if (type === 'add') {
-    a = 1 + Math.floor(Math.random() * (maxNumber - 1));
-    b = 1 + Math.floor(Math.random() * Math.max(1, maxNumber - a));
+    a = 1 + Math.floor(Math.random() * (maxNum - 1));
+    b = 1 + Math.floor(Math.random() * Math.max(1, maxNum - a));
     answer = a + b;
   } else {
     // Subtraction: a must be > b, result always >= 1
-    const subMax = level <= 3 ? Math.min(maxNumber, 4) : maxNumber;
+    const subMax = rules.subCap;
     a = 2 + Math.floor(Math.random() * Math.max(1, subMax - 2));
     b = 1 + Math.floor(Math.random() * Math.max(1, a - 1));
     // Safety: ensure a > b
@@ -4833,9 +4829,10 @@ function generateProblem() {
 
 function generateWrongAnswers(correct) {
   const candidates = [];
-  // Allow 0 only at higher levels (maxNumber > 5), never negative
-  const minAnswer = maxNumber > 5 ? 0 : 1;
-  for (let i = Math.max(minAnswer, correct - 3); i <= Math.min(correct + 3, maxNumber); i++) {
+  const rules = levelRules();
+  // Allow 0 only where the level permits it, never negative.
+  const minAnswer = rules.allowZeroWrong ? 0 : 1;
+  for (let i = Math.max(minAnswer, correct - 3); i <= Math.min(correct + 3, rules.maxNum); i++) {
     if (i !== correct && i >= minAnswer) candidates.push(i);
   }
   // Shuffle and pick 2
@@ -5926,33 +5923,41 @@ function handleAnswer(challenge, pile) {
 // Lvl 5: addition + subtraction 1-10 (numbers)
 // Lvl 6: 1-12
 // Lvl 7: 1-15
+// Each row is the COMPLETE rule set for that level — no difficulty thresholds
+// live in the generators anymore. maxNum: number range. useVisual: render dots
+// instead of numerals. canSubtract: subtraction is unlocked. subCap: largest
+// value a subtraction problem may use. allowZeroWrong: wrong answers may be 0.
+// needed: correct answers required to advance.
 const LEVELS = [
-  { maxNum: 5, name: 'Poziom 1' },
-  { maxNum: 7, name: 'Poziom 2' },
-  { maxNum: 7, name: 'Poziom 3' },   // same range but subtraction unlocks at 7
-  { maxNum: 9, name: 'Poziom 4' },
-  { maxNum: 10, name: 'Poziom 5' },
-  { maxNum: 12, name: 'Poziom 6' },
-  { maxNum: 15, name: 'Poziom 7' },
+  { name: 'Poziom 1', maxNum: 5,  useVisual: true,  canSubtract: false, subCap: 4,  allowZeroWrong: false, needed: 2 },
+  { name: 'Poziom 2', maxNum: 7,  useVisual: true,  canSubtract: true,  subCap: 4,  allowZeroWrong: true,  needed: 2 },
+  { name: 'Poziom 3', maxNum: 7,  useVisual: true,  canSubtract: true,  subCap: 4,  allowZeroWrong: true,  needed: 2 },
+  { name: 'Poziom 4', maxNum: 9,  useVisual: false, canSubtract: true,  subCap: 9,  allowZeroWrong: true,  needed: 3 },
+  { name: 'Poziom 5', maxNum: 10, useVisual: false, canSubtract: true,  subCap: 10, allowZeroWrong: true,  needed: 3 },
+  { name: 'Poziom 6', maxNum: 12, useVisual: false, canSubtract: true,  subCap: 12, allowZeroWrong: true,  needed: 3 },
+  { name: 'Poziom 7', maxNum: 15, useVisual: false, canSubtract: true,  subCap: 15, allowZeroWrong: true,  needed: 3 },
 ];
+
+// Single source of truth for the current level's rules. `level` is the only
+// difficulty state; maxNumber and the per-level thresholds derive from here.
+function levelRules() {
+  return LEVELS[Math.min(Math.max(level, 1) - 1, LEVELS.length - 1)];
+}
 
 function updateDifficulty() {
   const rate = totalAnswers > 0 ? correctAnswers / totalAnswers : 0;
 
-  // Fast advancement early, slower later
-  const needed = level <= 3 ? 2 : 3;
+  // Fast advancement early, slower later — threshold comes from the level row.
+  const needed = levelRules().needed;
   if (correctAnswers >= needed && rate >= 0.65 && level < LEVELS.length) {
     level = Math.min(level + 1, LEVELS.length);
-    maxNumber = LEVELS[Math.min(level - 1, LEVELS.length - 1)].maxNum;
-    const lvlName = LEVELS[Math.min(level - 1, LEVELS.length - 1)].name;
-    document.getElementById('level-display').textContent = lvlName;
+    document.getElementById('level-display').textContent = levelRules().name;
     correctAnswers = 0;
     totalAnswers = 0;
     // TODO: celebration for level up
   } else if (totalAnswers >= 5 && rate < 0.35 && level > 1) {
     level = Math.max(1, level - 1);
-    maxNumber = LEVELS[level - 1].maxNum;
-    document.getElementById('level-display').textContent = LEVELS[level - 1].name;
+    document.getElementById('level-display').textContent = levelRules().name;
     correctAnswers = 0;
     totalAnswers = 0;
   }
@@ -6026,7 +6031,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina, level, maxNumber,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina, level,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -6196,13 +6201,12 @@ window.startGame = async function () {
       inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
     }
     level = saved.level;
-    maxNumber = saved.maxNumber;
     correctAnswers = saved.correctAnswers;
     totalAnswers = saved.totalAnswers;
     runTimer = saved.runTimer || 0;
     walkTime = saved.walkTime || 0;
     updateCarrotHUD();
-    document.getElementById('level-display').textContent = `Poziom ${level} (do ${maxNumber})`;
+    document.getElementById('level-display').textContent = `Poziom ${level} (do ${levelRules().maxNum})`;
     horseGroup.position.copy(horsePos);
     horseGroup.rotation.y = horseAngle;
 
