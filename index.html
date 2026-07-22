@@ -374,6 +374,16 @@ const SHOP_ITEMS = {
 };
 let inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0 };
 
+// Economy — the single place that answers "can this shop item be bought?".
+// hasRoom and canAfford are split out so a prompt can explain WHY a purchase is
+// blocked (already owned vs too few coins); canBuy is the combined predicate the
+// zone-beacon cue and attemptBuyItem share instead of re-deriving it each.
+const Economy = {
+  hasRoom(itemKey) { const it = SHOP_ITEMS[itemKey]; return !!it && inventory[itemKey] < it.max; },
+  canAfford(itemKey) { const it = SHOP_ITEMS[itemKey]; return !!it && money >= it.price; },
+  canBuy(itemKey) { return this.hasRoom(itemKey) && this.canAfford(itemKey); },
+};
+
 // Consumable actions: which HUD key hints to render for inventory items
 const CONSUMABLE_ACTIONS = {
   siano:      { key: 'Z', verb: 'zjedz' },
@@ -1198,8 +1208,7 @@ function updateInteractionZones(dt) {
       if (zone.kind === 'sell') {
         cue = carrots > 0 || applesCollected > 0;
       } else if (zone.kind === 'buy') {
-        const it = SHOP_ITEMS[zone.itemKey];
-        cue = (inventory[zone.itemKey] < it.max) && (money >= it.price);
+        cue = Economy.canBuy(zone.itemKey);
       }
     }
     zone.beacon.material.emissiveIntensity = cue ? (0.6 + pulseT * 1.4) : 0.35;
@@ -1248,11 +1257,10 @@ function updateInteractionPrompt(activeZone) {
     }
   } else if (activeZone.kind === 'buy') {
     const it = SHOP_ITEMS[activeZone.itemKey];
-    const owned = inventory[activeZone.itemKey];
     const priceHtml = it.price === 0
       ? '<span style="font-size:44px;color:#ffdd77">GRATIS!</span>'
       : `${it.price} <span style="font-size:56px">🪙</span>`;
-    if (owned >= it.max) {
+    if (!Economy.hasRoom(activeZone.itemKey)) {
       if (activeZone.itemKey === 'list') {
         // Positive feedback right after pickup — only switches to
         // "no more letters" when the kid leaves and comes back.
@@ -1266,7 +1274,7 @@ function updateInteractionPrompt(activeZone) {
       } else {
         html = `<div style="opacity:0.9">Masz już <span style="font-size:60px">${it.emoji}</span> ${it.name}!</div>`;
       }
-    } else if (money < it.price) {
+    } else if (!Economy.canAfford(activeZone.itemKey)) {
       html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
         + `<div style="margin-top:6px;font-size:38px;opacity:0.95">${it.name}</div>`
         + `<div style="margin-top:14px;font-size:36px;color:#ffb0b0">Za mało monet 🪙</div>`
@@ -1682,8 +1690,7 @@ function attemptBuyItem(itemKey) {
   if (!zone) return;
   if (currentActiveZone && currentActiveZone !== zone) return;
   if (buyCooldown > 0) return;
-  if (inventory[itemKey] >= it.max) return;
-  if (money < it.price) return;
+  if (!Economy.canBuy(itemKey)) return;
   money -= it.price;
   inventory[itemKey] += 1;
   buyCooldown = 0.25;
@@ -4864,12 +4871,11 @@ function initInput() {
     // Buy actions ignore auto-repeat so holding the key doesn't drain coins
     // (max 80 coins/s at bank without this).
     if (!e.repeat) {
-      if (e.code === 'KeyN') attemptBuyItem('napoj');
-      if (e.code === 'KeyS') attemptBuyItem('siano');
-      if (e.code === 'KeyD') attemptBuyItem('diament');
-      if (e.code === 'KeyO') attemptBuyItem('odznaka');
-      if (e.code === 'KeyL') attemptBuyItem('list');
-      if (e.code === 'KeyP') attemptBuyItem('podkowa');
+      // Buy keys derive from SHOP_ITEMS[*].key — no parallel mapping to drift.
+      // fajerwerki (KeyF) is handled below because it toggles buy-vs-consume.
+      for (const [itemKey, it] of Object.entries(SHOP_ITEMS)) {
+        if (itemKey !== 'fajerwerki' && e.code === it.key) attemptBuyItem(itemKey);
+      }
       // New consumable-action keys
       if (e.code === 'KeyE') attemptJump();
       if (e.code === 'KeyZ') attemptEatHay();
