@@ -133,6 +133,46 @@ canvas { display: block; }
   transition: none;
 }
 
+/* Mobile action buttons — right-side stack, opposite the joystick.
+   Kids can't read, so every button is a single big emoji. They appear
+   contextually (buy/sell near a counter, consume when owned) plus a
+   persistent jump button. Only shown on touch devices. */
+#mobile-actions {
+  position: fixed; bottom: 20px; right: 20px;
+  z-index: 12; display: none;
+  flex-direction: column; align-items: flex-end; gap: 14px;
+}
+.mobile-btn {
+  width: 86px; height: 86px; border-radius: 50%;
+  background: rgba(0,0,0,0.42);
+  border: 4px solid rgba(255,255,255,0.55);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 46px; line-height: 1; position: relative;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: transform 0.08s;
+}
+.mobile-btn:active { transform: scale(0.9); background: rgba(0,0,0,0.6); }
+.mobile-btn.glow {
+  border-color: rgba(255,220,120,0.95);
+  animation: mobile-btn-pulse 0.9s ease-in-out infinite;
+}
+@keyframes mobile-btn-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0 0 rgba(255,220,120,0.6); }
+  50% { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 22px 6px rgba(255,220,120,0.85); }
+}
+/* Little coin corner-badge marks a buy button so it reads as "costs money"
+   and won't be confused with the same-emoji consume button. */
+.mobile-btn .badge {
+  position: absolute; top: -6px; right: -6px;
+  background: #ffd944; color: #3a1d08;
+  border-radius: 12px; padding: 1px 7px;
+  font-size: 20px; font-weight: 900;
+  box-shadow: 0 2px 0 #b89040;
+  display: flex; align-items: center; gap: 2px;
+}
+
 #pause-overlay {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.5);
@@ -205,6 +245,8 @@ canvas { display: block; }
   <div id="joystick-base"></div>
   <div id="joystick-thumb"></div>
 </div>
+
+<div id="mobile-actions"></div>
 
 <script type="importmap">
 {
@@ -1171,6 +1213,17 @@ function handColor(keyLetter) {
   return LEFT_HAND_LETTERS.has(keyLetter) ? '#7cc8ff' : '#8dea8d';
 }
 
+// "How to trigger this action" markup. On desktop it names the key + which hand;
+// on mobile (no keyboard) it points at the glowing action button on the right.
+function actionHintHTML(keyLabel, kbdStyle) {
+  if (isMobile) {
+    return `<span style="font-size:52px;vertical-align:middle">👉</span>`
+      + `<span style="font-size:26px;font-weight:800;opacity:0.9;margin-left:6px">dotknij przycisku</span>`;
+  }
+  return `<span style="${kbdStyle}">${keyLabel}</span>`
+    + `<span style="font-size:24px;color:${handColor(keyLabel)};font-weight:800;opacity:0.9">${handLabel(keyLabel)} ręką</span>`;
+}
+
 // Per-frame HUD writers used to re-parse identical HTML every frame. Cache the
 // last string per element so we only touch innerHTML when it actually changes.
 const __htmlCache = new WeakMap();
@@ -1249,10 +1302,10 @@ function updateInteractionPrompt(activeZone) {
       html = '<div style="opacity:0.85">Nazbieraj <span style="font-size:60px">🥕</span> lub <span style="font-size:60px">🍎</span><br>i wróć tutaj sprzedać!</div>';
     } else {
       if (carrots > 0) {
-        html += `<div>Naciśnij <span style="${kbdStyle}">M</span> <span style="font-size:24px;color:${handColor('M')};font-weight:800;opacity:0.9">${handLabel('M')} ręką</span> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
+        html += `<div>Naciśnij ${actionHintHTML('M', kbdStyle)} żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
       }
       if (applesCollected > 0) {
-        html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> <span style="font-size:24px;color:${handColor('J')};font-weight:800;opacity:0.9">${handLabel('J')} ręką</span> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
+        html += `<div style="margin-top:12px">Naciśnij ${actionHintHTML('J', kbdStyle)} żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
       }
     }
   } else if (activeZone.kind === 'buy') {
@@ -1284,10 +1337,10 @@ function updateInteractionPrompt(activeZone) {
       html = `<div style="font-size:72px;line-height:1">💌</div>`
         + `<div style="margin-top:8px;font-size:40px;color:#ffdd77">Nowy list dla farmera!</div>`
         + `<div style="margin-top:8px;font-size:32px;opacity:0.9">Weź i dostarcz na farmę,<br>a dostaniesz nagrodę 🪙</div>`
-        + `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span> <span style="font-size:24px;color:${handColor(it.keyLabel)};font-weight:800;opacity:0.9">${handLabel(it.keyLabel)} ręką</span></div>`;
+        + `<div style="margin-top:12px">Naciśnij ${actionHintHTML(it.keyLabel, kbdStyle)}</div>`;
     } else {
       html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
-        + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span> <span style="font-size:24px;color:${handColor(it.keyLabel)};font-weight:800;opacity:0.9">${handLabel(it.keyLabel)} ręką</span></div>`
+        + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(it.keyLabel, kbdStyle)}</div>`
         + `<div style="margin-top:10px;font-size:36px;opacity:0.9">${it.name} — ${priceHtml}</div>`;
     }
   }
@@ -4897,6 +4950,7 @@ function initInput() {
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if (isMobile) {
     document.getElementById('joystick-area').style.display = 'block';
+    document.getElementById('mobile-actions').style.display = 'flex';
     initJoystick();
   }
 
@@ -4964,6 +5018,88 @@ function initJoystick() {
 
   area.addEventListener('touchend', resetJoystick);
   area.addEventListener('touchcancel', resetJoystick);
+}
+
+// ===== Mobile action buttons =====
+// On phones/tablets there is no keyboard, so every keyboard-driven action needs
+// a tappable button. We rebuild the button set from the current context each
+// frame, but only touch the DOM when the set actually changes (keyed by a
+// signature string) so live buttons keep working and don't flicker.
+let mobileBtnSig = '';
+
+// Is there a farmer close enough to mount? (mirrors handleSpaceAction's radius)
+function nearMountableFarmer() {
+  for (const farmer of farmers) {
+    if (farmer.mounted) continue;
+    const fdx = horsePos.x - farmer.group.position.x;
+    const fdz = horsePos.z - farmer.group.position.z;
+    if (fdx * fdx + fdz * fdz < 36) return true; // 6m radius
+  }
+  return false;
+}
+
+// Build the list of action buttons that make sense right now.
+function computeMobileActions() {
+  const list = [];
+
+  // Nearest counter zone — buy or sell. glow:true draws the kid's eye, matching
+  // the 3D beacon pulse used for the same "this action is useful now" cue.
+  const z = currentActiveZone;
+  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
+    const it = SHOP_ITEMS[z.itemKey];
+    list.push({ id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
+      badge: it.price === 0 ? '🎁' : it.price + '🪙',
+      action: () => attemptBuyItem(z.itemKey) });
+  } else if (z && z.kind === 'sell') {
+    if (carrots > 0) list.push({ id: 'sell:carrot', emoji: '🥕', glow: true,
+      action: () => attemptSellItem('carrot') });
+    if (applesCollected > 0) list.push({ id: 'sell:apple', emoji: '🍎', glow: true,
+      action: () => attemptSellItem('apple') });
+  }
+
+  // Mount / dismount a farmer (Space on desktop).
+  if (ridingFarmer) {
+    list.push({ id: 'farmer:down', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+  } else if (nearMountableFarmer()) {
+    list.push({ id: 'farmer:up', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+  }
+
+  // Consumables — only when owned. Same emoji as the item so it's recognisable.
+  if ((inventory.siano || 0) > 0)
+    list.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
+  if ((inventory.napoj || 0) > 0)
+    list.push({ id: 'drink', emoji: '🥤', action: attemptDrinkWater });
+  if ((inventory.fajerwerki || 0) > 0)
+    list.push({ id: 'fire', emoji: '🎇', action: consumeFajerwerki });
+
+  // Jump — always available, so always the bottom-most button.
+  list.push({ id: 'jump', emoji: '⤴️', action: attemptJump });
+
+  return list;
+}
+
+function updateMobileButtons() {
+  if (!isMobile) return;
+  const container = document.getElementById('mobile-actions');
+  if (!container) return;
+
+  const list = computeMobileActions();
+  const sig = list.map(b => b.id + (b.glow ? '!' : '') + (b.badge || '')).join('|');
+  if (sig === mobileBtnSig) return; // nothing changed — leave live buttons alone
+  mobileBtnSig = sig;
+
+  container.innerHTML = '';
+  for (const b of list) {
+    const btn = document.createElement('div');
+    btn.className = 'mobile-btn' + (b.glow ? ' glow' : '');
+    btn.innerHTML = b.emoji + (b.badge ? `<span class="badge">${b.badge}</span>` : '');
+    // Fire on touchstart for snappy feel; stop the event so it never reaches
+    // the canvas or joystick. Also bind click for good measure (mouse testing).
+    const fire = (e) => { e.preventDefault(); e.stopPropagation(); b.action(); };
+    btn.addEventListener('touchstart', fire, { passive: false });
+    btn.addEventListener('click', fire);
+    container.appendChild(btn);
+  }
 }
 
 function getInput() {
@@ -5043,9 +5179,14 @@ function updateCarrotHUD() {
         + `<span style="color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${n}</span>`;
       const action = CONSUMABLE_ACTIONS[k];
       if (action) {
-        row += `<span style="${badgeStyle};border:2px solid ${handColor(action.key)}">${action.key}</span>`
-          + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`
-          + `<span style="font-size:18px;color:${handColor(action.key)};font-weight:800;opacity:0.9;margin-left:2px">${handLabel(action.key)} ręką</span>`;
+        if (isMobile) {
+          row += `<span style="font-size:32px">👉</span>`
+            + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`;
+        } else {
+          row += `<span style="${badgeStyle};border:2px solid ${handColor(action.key)}">${action.key}</span>`
+            + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`
+            + `<span style="font-size:18px;color:${handColor(action.key)};font-weight:800;opacity:0.9;margin-left:2px">${handLabel(action.key)} ręką</span>`;
+        }
       }
       row += `</div>`;
       html += row;
@@ -5055,17 +5196,20 @@ function updateCarrotHUD() {
   // Controls hint below inventory — separate visually so kid doesn't
   // read it as an owned item. Persistent so jump is always discoverable.
   html += `<div class="row" style="margin-top:10px;padding-top:8px;border-top:2px solid rgba(255,255,255,0.25);font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
-    + `<span style="${badgeStyle};border:2px solid ${handColor('E')}">E</span>`
-    + `<span>skok konia</span>`
-    + `<span style="font-size:18px;color:${handColor('E')};font-weight:800;opacity:0.9;margin-left:2px">${handLabel('E')} ręką</span>`
+    + (isMobile
+        ? `<span style="font-size:32px">⤴️</span><span>skok konia</span>`
+        : `<span style="${badgeStyle};border:2px solid ${handColor('E')}">E</span>`
+          + `<span>skok konia</span>`
+          + `<span style="font-size:18px;color:${handColor('E')};font-weight:800;opacity:0.9;margin-left:2px">${handLabel('E')} ręką</span>`)
     + `</div>`;
-  // Sprint hint — Left Shift is a left-hand control; shift is not a letter
-  // so the badge shows "Shift" spelled out.
-  html += `<div class="row" style="font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
-    + `<span style="${badgeStyle};border:2px solid #7cc8ff;font-size:22px">Shift</span>`
-    + `<span>sprint (⚡)</span>`
-    + `<span style="font-size:18px;color:#7cc8ff;font-weight:800;opacity:0.9;margin-left:2px">lewą ręką</span>`
-    + `</div>`;
+  // Sprint hint — desktop only (Shift has no touch equivalent).
+  if (!isMobile) {
+    html += `<div class="row" style="font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
+      + `<span style="${badgeStyle};border:2px solid #7cc8ff;font-size:22px">Shift</span>`
+      + `<span>sprint (⚡)</span>`
+      + `<span style="font-size:18px;color:#7cc8ff;font-weight:800;opacity:0.9;margin-left:2px">lewą ręką</span>`
+      + `</div>`;
+  }
 
   hud.innerHTML = html || '&nbsp;';
 
@@ -5572,6 +5716,7 @@ function update() {
   animateFireworks(dt);
   animateSprintSparkles(dt);
   updateInteractionZones(dt);
+  updateMobileButtons();
   updateLetterDelivery(dt);
   updatePassengerQuests(dt);
   updateStaminaBar();
