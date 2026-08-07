@@ -55,15 +55,14 @@ canvas { display: block; }
   text-shadow: 0 0 20px rgba(0,0,0,0.8); pointer-events: none;
 }
 
-/* On phones the overlay boxes were sized for a laptop and swallowed the whole
-   screen. Shrink them uniformly via transform (keeping their centering) so the
-   box hugs its content — emojis included — without rewriting every inline size.
+/* On small screens the overlay boxes were sized for a laptop and swallowed the
+   whole view. Shrink them uniformly via transform (keeping their centering) so
+   the box hugs its content — emojis included — without rewriting every inline
+   size. Gated on `body.compact` (touch AND a small viewport, set in initInput),
+   not merely touch, so big tablets — a supported target — keep readable UI.
    The action buttons now carry the "what to do" cue, so the text can be small. */
-body.mobile #question-bar {
+body.compact #question-bar {
   transform: translateX(-50%) scale(0.72); transform-origin: top center;
-}
-body.mobile #feedback {
-  transform: translate(-50%, -50%) scale(0.7);
 }
 
 #intro {
@@ -149,12 +148,16 @@ body.mobile #feedback {
    contextually (buy/sell near a counter, consume when owned) plus a
    persistent jump button. Only shown on touch devices. */
 /* On mobile the minimap shares the bottom-right corner with the action
-   buttons, so shrink it a touch to free vertical room for the stack. */
-body.mobile #minimap { width: 120px; height: 120px; }
+   buttons, so shrink it a touch to free vertical room for the stack. The
+   minimap keeps its base bottom:15px; --mm-size is the single source of truth
+   for its size, and the button stack derives its offset from it via calc() so
+   the two can never drift out of sync. */
+body.mobile { --mm-size: 120px; }
+body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 #mobile-actions {
-  /* Sits above the minimap (bottom:15px + ~120px tall on mobile) so the two
-     don't overlap. Grows upward; the jump button stays pinned at the bottom. */
-  position: fixed; bottom: 148px; right: 16px;
+  /* Sits just above the minimap (its bottom + size + a gap) so the two never
+     overlap. Grows upward; the jump button stays pinned at the bottom. */
+  position: fixed; bottom: calc(15px + var(--mm-size, 120px) + 13px); right: 16px;
   z-index: 12; display: none;
   flex-direction: column; align-items: flex-end; gap: 12px;
 }
@@ -173,8 +176,8 @@ body.mobile #minimap { width: 120px; height: 120px; }
 /* Short screens (landscape phones) have little vertical room above the minimap,
    so shrink everything in the bottom-right corner to keep the stack on-screen. */
 @media (max-height: 520px) {
-  body.mobile #minimap { width: 88px; height: 88px; }
-  #mobile-actions { bottom: 108px; gap: 6px; }
+  body.mobile { --mm-size: 88px; } /* button offset follows via calc() */
+  #mobile-actions { gap: 6px; }
   .mobile-btn { width: 58px; height: 58px; font-size: 31px; border-width: 3px; }
   .mobile-btn .badge { font-size: 15px; padding: 1px 5px; }
 }
@@ -473,6 +476,10 @@ let challengeCooldown = 0;
 const keys = {};
 let joystickDir = { x: 0, y: 0 };
 let isMobile = false;
+// compactUI: shrink the overlay boxes only on genuinely small screens. Touch
+// alone isn't enough — a big tablet is a supported target and shouldn't get
+// 60% UI. Set alongside isMobile in initInput.
+let compactUI = false;
 
 // Tree positions (for collision avoidance)
 let treePositions = [];
@@ -1301,9 +1308,9 @@ let sellPromptEl = null;
 function updateInteractionPrompt(activeZone) {
   if (!sellPromptEl) {
     sellPromptEl = document.createElement('div');
-    // On mobile the box is scaled down (and anchored to its top) so it stops
-    // covering the play area; the action button already shows what to do.
-    const scaleTf = isMobile
+    // On small screens the box is scaled down (and anchored to its top) so it
+    // stops covering the play area; the action button already shows what to do.
+    const scaleTf = compactUI
       ? 'transform:translateX(-50%) scale(0.6);transform-origin:top center;'
       : 'transform:translateX(-50%);';
     sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;' + scaleTf
@@ -1452,9 +1459,9 @@ function showTransientPopup(key, opts, html) {
     entry = _transientPopups[key] = { el, timer: 0 };
   }
   const { el } = entry;
-  // On mobile these feedback bubbles were laptop-sized and blanketed the view —
-  // shrink them so they read as a quick "+1" toast, not a full-screen banner.
-  const f = isMobile ? 0.6 : 1;
+  // On small screens these feedback bubbles were laptop-sized and blanketed the
+  // view — shrink them so they read as a quick "+1" toast, not a full banner.
+  const f = compactUI ? 0.6 : 1;
   el.innerHTML = html;
   el.style.opacity = '1';
   el.style.transform = `translate(-50%,-50%) scale(${popScale * f})`;
@@ -4984,6 +4991,11 @@ function initInput() {
     document.getElementById('joystick-area').style.display = 'block';
     document.getElementById('mobile-actions').style.display = 'flex';
     document.body.classList.add('mobile');
+    // Small screen (phone / small tablet) → shrink overlays. Uses the shorter
+    // viewport edge so it's orientation-independent; ~900px keeps 10" tablets
+    // compact but leaves 12.9" tablets at full size.
+    compactUI = Math.min(window.innerWidth, window.innerHeight) < 900;
+    if (compactUI) document.body.classList.add('compact');
     initJoystick();
   }
 
