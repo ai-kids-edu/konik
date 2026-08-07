@@ -173,9 +173,11 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
   transition: transform 0.08s;
 }
 .mobile-btn:active { transform: scale(0.9); background: rgba(0,0,0,0.6); }
-/* Short screens (landscape phones) have little vertical room above the minimap,
-   so shrink everything in the bottom-right corner to keep the stack on-screen. */
-@media (max-height: 520px) {
+/* Phone-sized screens have little room around the minimap, so shrink everything
+   in the bottom-right corner to keep the button stack on-screen. Covers both
+   landscape phones (short height) and portrait phones (narrow width); tablets
+   (>=~min 520px edge) keep the full-size layout, which has room to spare. */
+@media (max-height: 520px), (max-width: 480px) {
   body.mobile { --mm-size: 88px; } /* button offset follows via calc() */
   #mobile-actions { gap: 6px; }
   .mobile-btn { width: 58px; height: 58px; font-size: 31px; border-width: 3px; }
@@ -5084,38 +5086,51 @@ function nearMountableFarmer() {
 }
 
 // Build the list of action buttons that make sense right now.
+// Order matters: the stack is a bottom-anchored column, so earlier items sit
+// higher and are the first to clip off-screen-top if space runs out. We put the
+// always-available consumables first (top, least urgent) and the situational
+// buy/sell/farmer actions last, just above the bottom-pinned jump — so on a
+// cramped screen the important, in-the-moment actions stay within thumb reach.
 function computeMobileActions() {
-  const list = [];
-
-  // Nearest counter zone — buy or sell. glow:true draws the kid's eye, matching
-  // the 3D beacon pulse used for the same "this action is useful now" cue.
-  const z = currentActiveZone;
-  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
-    const it = SHOP_ITEMS[z.itemKey];
-    list.push({ id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
-      badge: it.price === 0 ? '🎁' : it.price + '🪙',
-      action: () => attemptBuyItem(z.itemKey) });
-  } else if (z && z.kind === 'sell') {
-    if (carrots > 0) list.push({ id: 'sell:carrot', emoji: '🥕', glow: true,
-      action: () => attemptSellItem('carrot') });
-    if (applesCollected > 0) list.push({ id: 'sell:apple', emoji: '🍎', glow: true,
-      action: () => attemptSellItem('apple') });
-  }
-
-  // Mount / dismount a farmer (Space on desktop).
-  if (ridingFarmer) {
-    list.push({ id: 'farmer:down', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
-  } else if (nearMountableFarmer()) {
-    list.push({ id: 'farmer:up', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
-  }
+  const consumables = [];
+  const contextual = [];
 
   // Consumables — only when owned. Same emoji as the item so it's recognisable.
   if ((inventory.siano || 0) > 0)
-    list.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
+    consumables.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
   if ((inventory.napoj || 0) > 0)
-    list.push({ id: 'drink', emoji: '🥤', action: attemptDrinkWater });
+    consumables.push({ id: 'drink', emoji: '🥤', action: attemptDrinkWater });
   if ((inventory.fajerwerki || 0) > 0)
-    list.push({ id: 'fire', emoji: '🎇', action: consumeFajerwerki });
+    consumables.push({ id: 'fire', emoji: '🎇', action: consumeFajerwerki });
+
+  // Mount / dismount a farmer (Space on desktop). glow draws the kid's eye,
+  // like the 3D beacon pulse used for the same "useful now" cue.
+  if (ridingFarmer) {
+    contextual.push({ id: 'farmer:down', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+  } else if (nearMountableFarmer()) {
+    contextual.push({ id: 'farmer:up', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+  }
+  // Sell buttons — keyed off sellZone.inZone directly (like attemptSellItem),
+  // NOT the nearest zone. The sell and siano-buy counters overlap, so the
+  // nearest zone is often the buy one; gating sell on "nearest" would leave a
+  // mobile kid standing in the overlap unable to sell what a desktop kid can.
+  if (sellZone && sellZone.inZone) {
+    if (carrots > 0) contextual.push({ id: 'sell:carrot', emoji: '🥕', glow: true,
+      action: () => attemptSellItem('carrot') });
+    if (applesCollected > 0) contextual.push({ id: 'sell:apple', emoji: '🍎', glow: true,
+      action: () => attemptSellItem('apple') });
+  }
+  // Buy button — for the nearest active counter, matching attemptBuyItem which
+  // only lets you buy from the nearest zone. Placed last (nearest the thumb).
+  const z = currentActiveZone;
+  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
+    const it = SHOP_ITEMS[z.itemKey];
+    contextual.push({ id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
+      badge: it.price === 0 ? '🎁' : it.price + '🪙',
+      action: () => attemptBuyItem(z.itemKey) });
+  }
+
+  const list = [...consumables, ...contextual];
 
   // Jump — always available, so always the bottom-most button.
   list.push({ id: 'jump', emoji: '⤴️', action: attemptJump });
@@ -5139,8 +5154,18 @@ function updateMobileButtons() {
     btn.className = 'mobile-btn' + (b.glow ? ' glow' : '');
     btn.innerHTML = b.emoji + (b.badge ? `<span class="badge">${b.badge}</span>` : '');
     // Fire on touchstart for snappy feel; stop the event so it never reaches
-    // the canvas or joystick. Also bind click for good measure (mouse testing).
-    const fire = (e) => { e.preventDefault(); e.stopPropagation(); b.action(); };
+    // the canvas or joystick. Click is kept as a fallback (mouse testing), but a
+    // per-button recency guard drops the synthetic click that follows a
+    // touchstart — otherwise a single tap could double-fire cooldown-free
+    // actions (a second jump, a wasted firework). e.timeStamp is monotonic and
+    // shared across both event types, so no clock API is needed.
+    let lastFire = -1e9;
+    const fire = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.timeStamp - lastFire < 400) return;
+      lastFire = e.timeStamp;
+      b.action();
+    };
     btn.addEventListener('touchstart', fire, { passive: false });
     btn.addEventListener('click', fire);
     container.appendChild(btn);
