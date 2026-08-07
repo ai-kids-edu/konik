@@ -55,6 +55,17 @@ canvas { display: block; }
   text-shadow: 0 0 20px rgba(0,0,0,0.8); pointer-events: none;
 }
 
+/* On phones the overlay boxes were sized for a laptop and swallowed the whole
+   screen. Shrink them uniformly via transform (keeping their centering) so the
+   box hugs its content — emojis included — without rewriting every inline size.
+   The action buttons now carry the "what to do" cue, so the text can be small. */
+body.mobile #question-bar {
+  transform: translateX(-50%) scale(0.72); transform-origin: top center;
+}
+body.mobile #feedback {
+  transform: translate(-50%, -50%) scale(0.7);
+}
+
 #intro {
   position: fixed; inset: 0;
   background: linear-gradient(170deg, #87CEEB 0%, #a8e6ff 25%, #90d48a 50%, #5aad3a 75%, #3a7a25 100%);
@@ -137,23 +148,36 @@ canvas { display: block; }
    Kids can't read, so every button is a single big emoji. They appear
    contextually (buy/sell near a counter, consume when owned) plus a
    persistent jump button. Only shown on touch devices. */
+/* On mobile the minimap shares the bottom-right corner with the action
+   buttons, so shrink it a touch to free vertical room for the stack. */
+body.mobile #minimap { width: 120px; height: 120px; }
 #mobile-actions {
-  position: fixed; bottom: 20px; right: 20px;
+  /* Sits above the minimap (bottom:15px + ~120px tall on mobile) so the two
+     don't overlap. Grows upward; the jump button stays pinned at the bottom. */
+  position: fixed; bottom: 148px; right: 16px;
   z-index: 12; display: none;
-  flex-direction: column; align-items: flex-end; gap: 14px;
+  flex-direction: column; align-items: flex-end; gap: 12px;
 }
 .mobile-btn {
-  width: 86px; height: 86px; border-radius: 50%;
+  width: 78px; height: 78px; border-radius: 50%;
   background: rgba(0,0,0,0.42);
   border: 4px solid rgba(255,255,255,0.55);
   box-shadow: 0 4px 14px rgba(0,0,0,0.45);
   display: flex; align-items: center; justify-content: center;
-  font-size: 46px; line-height: 1; position: relative;
+  font-size: 42px; line-height: 1; position: relative;
   -webkit-user-select: none; user-select: none;
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;
   transition: transform 0.08s;
 }
 .mobile-btn:active { transform: scale(0.9); background: rgba(0,0,0,0.6); }
+/* Short screens (landscape phones) have little vertical room above the minimap,
+   so shrink everything in the bottom-right corner to keep the stack on-screen. */
+@media (max-height: 520px) {
+  body.mobile #minimap { width: 88px; height: 88px; }
+  #mobile-actions { bottom: 108px; gap: 6px; }
+  .mobile-btn { width: 58px; height: 58px; font-size: 31px; border-width: 3px; }
+  .mobile-btn .badge { font-size: 15px; padding: 1px 5px; }
+}
 .mobile-btn.glow {
   border-color: rgba(255,220,120,0.95);
   animation: mobile-btn-pulse 0.9s ease-in-out infinite;
@@ -1277,7 +1301,12 @@ let sellPromptEl = null;
 function updateInteractionPrompt(activeZone) {
   if (!sellPromptEl) {
     sellPromptEl = document.createElement('div');
-    sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;transform:translateX(-50%);'
+    // On mobile the box is scaled down (and anchored to its top) so it stops
+    // covering the play area; the action button already shows what to do.
+    const scaleTf = isMobile
+      ? 'transform:translateX(-50%) scale(0.6);transform-origin:top center;'
+      : 'transform:translateX(-50%);';
+    sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;' + scaleTf
       + 'background:rgba(0,0,0,0.72);color:#fff;padding:24px 40px;border-radius:24px;'
       + 'font-size:44px;font-weight:800;pointer-events:none;z-index:150;text-align:center;'
       + 'border:4px solid rgba(255,220,120,0.9);box-shadow:0 10px 40px rgba(0,0,0,0.6);'
@@ -1423,13 +1452,16 @@ function showTransientPopup(key, opts, html) {
     entry = _transientPopups[key] = { el, timer: 0 };
   }
   const { el } = entry;
+  // On mobile these feedback bubbles were laptop-sized and blanketed the view —
+  // shrink them so they read as a quick "+1" toast, not a full-screen banner.
+  const f = isMobile ? 0.6 : 1;
   el.innerHTML = html;
   el.style.opacity = '1';
-  el.style.transform = `translate(-50%,-50%) scale(${popScale})`;
+  el.style.transform = `translate(-50%,-50%) scale(${popScale * f})`;
   if (entry.timer) clearTimeout(entry.timer);
   entry.timer = setTimeout(() => {
     el.style.opacity = '0';
-    el.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    el.style.transform = `translate(-50%,-90%) scale(${0.8 * f})`;
     entry.timer = 0;
   }, duration);
 }
@@ -4951,6 +4983,7 @@ function initInput() {
   if (isMobile) {
     document.getElementById('joystick-area').style.display = 'block';
     document.getElementById('mobile-actions').style.display = 'flex';
+    document.body.classList.add('mobile');
     initJoystick();
   }
 
