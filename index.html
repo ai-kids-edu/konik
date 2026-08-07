@@ -5261,30 +5261,37 @@ function updateMobileButtons() {
 }
 
 function getInput() {
-  let forward = 0, turn = 0;
+  let forward = 0, turn = 0, turnIntent = 0;
 
   // Freeze controls while eating
-  if (isEatingCarrots) return { forward: 0, turn: 0, moving: false };
+  if (isEatingCarrots) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
 
   if (keys['ArrowUp'] || keys['KeyW']) forward = 1;
   if (keys['ArrowDown'] || keys['KeyS']) forward = -1;
-  if (keys['ArrowLeft'] || keys['KeyA']) turn = 1;
-  if (keys['ArrowRight'] || keys['KeyD']) turn = -1;
+  if (keys['ArrowLeft'] || keys['KeyA']) { turn = 1; turnIntent = 1; }
+  if (keys['ArrowRight'] || keys['KeyD']) { turn = -1; turnIntent = -1; }
 
   if (isMobile) {
     forward += -joystickDir.y; // stick up = forward (negative y)
-    // Gentle steering for small hands: square the stick's sideways push (keeping
-    // its sign) and cap it below full, so small/moderate tilts turn softly and
-    // even a full sideways push isn't twitchy. Keyboard turning is unchanged.
     const jx = -joystickDir.x; // stick left = turn left
+    // turnIntent tracks the raw sideways push — used for the "am I moving/
+    // turning" flag and the steering meter, so both reflect what the child does.
+    turnIntent += jx;
+    // Actual rotation is gentler: square the push (keeping its sign) and cap it
+    // below full, so small/moderate tilts turn softly and even a full push isn't
+    // twitchy. Keyboard turning is unchanged.
     turn += Math.sign(jx) * jx * jx * 0.8;
   }
 
   forward = THREE.MathUtils.clamp(forward, -1, 1);
   turn = THREE.MathUtils.clamp(turn, -1, 1);
+  turnIntent = THREE.MathUtils.clamp(turnIntent, -1, 1);
 
-  const moving = Math.abs(forward) > 0.1 || Math.abs(turn) > 0.1;
-  return { forward, turn, moving };
+  // moving keys off the raw intent, not the softened turn — otherwise a moderate
+  // tilt (whose squared turn is <0.1) would rotate the horse while the game
+  // treated it as idle (idle animation, meter hidden).
+  const moving = Math.abs(forward) > 0.1 || Math.abs(turnIntent) > 0.1;
+  return { forward, turn, turnIntent, moving };
 }
 
 // ========== MINIMAP ==========
@@ -5671,7 +5678,9 @@ function update() {
   // Rotate horse (tank-style turning) — slower for easier aiming
   const turnSpeed = 2.0;
   horseAngle += input.turn * turnSpeed * dt;
-  updateSteerIndicator(input.turn, input.moving);
+  // Meter shows the raw steering intent (full range) so a full push reads as a
+  // full turn, even though the horse itself rotates on the softened curve.
+  updateSteerIndicator(input.turnIntent, input.moving);
 
   // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
   isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
