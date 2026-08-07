@@ -5095,12 +5095,27 @@ function computeMobileActions() {
   const consumables = [];
   const contextual = [];
 
+  // Buy button first — for the nearest active counter, matching attemptBuyItem
+  // which only lets you buy from the nearest zone. Built up front so we know
+  // which item is being bought and can hide its duplicate consume button below.
+  const z = currentActiveZone;
+  let buyBtn = null;
+  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
+    const it = SHOP_ITEMS[z.itemKey];
+    buyBtn = { id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
+      badge: it.price === 0 ? '🎁' : it.price + '🪙',
+      action: () => attemptBuyItem(z.itemKey) };
+  }
+  const buyingItem = buyBtn ? z.itemKey : null;
+
   // Consumables — only when owned. Same emoji as the item so it's recognisable.
-  if ((inventory.siano || 0) > 0)
+  // Skip the one whose buy button is showing at this stall, so a non-reader
+  // never faces two identical emoji (e.g. a 🎇 that buys vs a 🎇 that detonates).
+  if ((inventory.siano || 0) > 0 && buyingItem !== 'siano')
     consumables.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
-  if ((inventory.napoj || 0) > 0)
+  if ((inventory.napoj || 0) > 0 && buyingItem !== 'napoj')
     consumables.push({ id: 'drink', emoji: '🥤', action: attemptDrinkWater });
-  if ((inventory.fajerwerki || 0) > 0)
+  if ((inventory.fajerwerki || 0) > 0 && buyingItem !== 'fajerwerki')
     consumables.push({ id: 'fire', emoji: '🎇', action: consumeFajerwerki });
 
   // Mount / dismount a farmer (Space on desktop). glow draws the kid's eye,
@@ -5120,15 +5135,8 @@ function computeMobileActions() {
     if (applesCollected > 0) contextual.push({ id: 'sell:apple', emoji: '🍎', glow: true,
       action: () => attemptSellItem('apple') });
   }
-  // Buy button — for the nearest active counter, matching attemptBuyItem which
-  // only lets you buy from the nearest zone. Placed last (nearest the thumb).
-  const z = currentActiveZone;
-  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
-    const it = SHOP_ITEMS[z.itemKey];
-    contextual.push({ id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
-      badge: it.price === 0 ? '🎁' : it.price + '🪙',
-      action: () => attemptBuyItem(z.itemKey) });
-  }
+  // Buy button goes last (nearest the thumb).
+  if (buyBtn) contextual.push(buyBtn);
 
   const list = [...consumables, ...contextual];
 
@@ -5153,21 +5161,14 @@ function updateMobileButtons() {
     const btn = document.createElement('div');
     btn.className = 'mobile-btn' + (b.glow ? ' glow' : '');
     btn.innerHTML = b.emoji + (b.badge ? `<span class="badge">${b.badge}</span>` : '');
-    // Fire on touchstart for snappy feel; stop the event so it never reaches
-    // the canvas or joystick. Click is kept as a fallback (mouse testing), but a
-    // per-button recency guard drops the synthetic click that follows a
-    // touchstart — otherwise a single tap could double-fire cooldown-free
-    // actions (a second jump, a wasted firework). e.timeStamp is monotonic and
-    // shared across both event types, so no clock API is needed.
-    let lastFire = -1e9;
-    const fire = (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (e.timeStamp - lastFire < 400) return;
-      lastFire = e.timeStamp;
-      b.action();
-    };
-    btn.addEventListener('touchstart', fire, { passive: false });
-    btn.addEventListener('click', fire);
+    // Fire on pointerdown — one event per press across touch, mouse and pen, so
+    // a single tap can never double-fire cooldown-free actions (jump, firework).
+    // This deliberately avoids binding both touchstart and click: the synthetic
+    // click that follows touchstart could land on a *rebuilt* button and trigger
+    // the wrong action. preventDefault suppresses that compat click and any
+    // scroll/zoom; stopPropagation keeps it off the canvas/joystick.
+    const fire = (e) => { e.preventDefault(); e.stopPropagation(); b.action(); };
+    btn.addEventListener('pointerdown', fire);
     container.appendChild(btn);
   }
 }
