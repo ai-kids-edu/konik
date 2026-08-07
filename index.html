@@ -148,6 +148,35 @@ body.compact #question-bar {
   opacity: 0; transition: opacity 0.12s;
 }
 
+/* Steering feedback bar (bottom-centre). A "keep the ball in the middle" meter:
+   the marker slides toward the turn direction and shifts green->orange with
+   strength; centred + green means straight. Fades in only while moving. */
+#steer-indicator {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  width: 200px; height: 40px; z-index: 11;
+  background: rgba(0,0,0,0.38); border-radius: 20px;
+  border: 3px solid rgba(255,255,255,0.28);
+  opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+#steer-indicator .chev {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  font-size: 22px; font-weight: 900; color: #fff; opacity: 0.4;
+}
+#steer-indicator .chev.l { left: 12px; }
+#steer-indicator .chev.r { right: 12px; }
+#steer-tick {
+  position: absolute; left: 50%; top: 9px; bottom: 9px; width: 3px;
+  margin-left: -1.5px; background: rgba(255,255,255,0.55); border-radius: 2px;
+}
+#steer-marker {
+  position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
+  border-radius: 50%; background: #4ade5c;
+  border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 0 8px rgba(0,0,0,0.4);
+  transform: translate(-50%, -50%);
+  transition: transform 0.08s linear, background 0.12s linear;
+}
+
 /* Mobile action buttons — right-side stack, opposite the joystick.
    Kids can't read, so every button is a single big emoji. They appear
    contextually (buy/sell near a counter, consume when owned) plus a
@@ -281,6 +310,15 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 </div>
 
 <div id="mobile-actions"></div>
+
+<!-- Steering feedback: marker sits centred + green when going straight, slides
+     left/right and turns orange to show which way / how hard we're turning. -->
+<div id="steer-indicator">
+  <span class="chev l">‹</span>
+  <div id="steer-tick"></div>
+  <div id="steer-marker"></div>
+  <span class="chev r">›</span>
+</div>
 
 <script type="importmap">
 {
@@ -5166,6 +5204,26 @@ function computeMobileActions() {
   return list;
 }
 
+// Drive the bottom-centre steering meter from the current turn value. Marker
+// centred + green = straight; it slides toward the turn direction and shifts
+// toward orange (and grows) with strength. Fades out when the horse is still.
+let _steerEls = null;
+function updateSteerIndicator(turn, moving) {
+  if (!_steerEls) _steerEls = {
+    box: document.getElementById('steer-indicator'),
+    marker: document.getElementById('steer-marker'),
+  };
+  const { box, marker } = _steerEls;
+  if (!box || !marker) return;
+  box.style.opacity = moving ? '1' : '0';
+  const t = Math.max(-1, Math.min(1, turn));   // +t = turning left
+  const mag = Math.abs(t);
+  const offset = -t * 74;                       // px from centre (left = negative)
+  const scale = 1 + mag * 0.25;
+  marker.style.transform = `translate(calc(-50% + ${offset.toFixed(1)}px), -50%) scale(${scale.toFixed(2)})`;
+  marker.style.background = `hsl(${(130 - 100 * mag).toFixed(0)}, 80%, 55%)`; // green→orange
+}
+
 function updateMobileButtons() {
   if (!isMobile) return;
   const container = document.getElementById('mobile-actions');
@@ -5215,7 +5273,11 @@ function getInput() {
 
   if (isMobile) {
     forward += -joystickDir.y; // stick up = forward (negative y)
-    turn += -joystickDir.x;   // stick left = turn left (negative x)
+    // Gentle steering for small hands: square the stick's sideways push (keeping
+    // its sign) and cap it below full, so small/moderate tilts turn softly and
+    // even a full sideways push isn't twitchy. Keyboard turning is unchanged.
+    const jx = -joystickDir.x; // stick left = turn left
+    turn += Math.sign(jx) * jx * jx * 0.8;
   }
 
   forward = THREE.MathUtils.clamp(forward, -1, 1);
@@ -5609,6 +5671,7 @@ function update() {
   // Rotate horse (tank-style turning) — slower for easier aiming
   const turnSpeed = 2.0;
   horseAngle += input.turn * turnSpeed * dt;
+  updateSteerIndicator(input.turn, input.moving);
 
   // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
   isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
