@@ -127,20 +127,25 @@ body.compact #question-bar {
 #intro button:hover { transform: scale(1.08); box-shadow: 0 8px 35px rgba(255,100,50,0.6); }
 #intro button:active { transform: scale(0.95); }
 
+/* Floating joystick: the whole lower-left of the screen is the active zone, so a
+   child never has to aim for a small circle — the stick appears wherever they
+   press. base/thumb are position:fixed and placed by JS at the touch point.
+   touch-action:none stops the browser hijacking the drag as a scroll/gesture. */
 #joystick-area {
-  position: fixed; bottom: 20px; left: 20px; width: 160px; height: 160px;
-  z-index: 10; display: none;
+  position: fixed; left: 0; bottom: 0; width: 55vw; height: 80vh;
+  z-index: 10; display: none; touch-action: none;
 }
 #joystick-base {
-  width: 140px; height: 140px; border-radius: 50%;
-  background: rgba(255,255,255,0.12); border: 3px solid rgba(255,255,255,0.25);
-  position: absolute; bottom: 0; left: 0;
+  position: fixed; width: 160px; height: 160px; border-radius: 50%;
+  background: rgba(255,255,255,0.12); border: 4px solid rgba(255,255,255,0.35);
+  transform: translate(-50%, -50%); pointer-events: none;
+  opacity: 0; transition: opacity 0.12s;
 }
 #joystick-thumb {
-  width: 60px; height: 60px; border-radius: 50%;
-  background: rgba(255,255,255,0.35);
-  position: absolute; bottom: 40px; left: 40px;
-  transition: none;
+  position: fixed; width: 78px; height: 78px; border-radius: 50%;
+  background: rgba(255,255,255,0.42); border: 3px solid rgba(255,255,255,0.5);
+  transform: translate(-50%, -50%); pointer-events: none;
+  opacity: 0; transition: opacity 0.12s;
 }
 
 /* Mobile action buttons — right-side stack, opposite the joystick.
@@ -5023,48 +5028,57 @@ function initJoystick() {
   const area = document.getElementById('joystick-area');
   const thumb = document.getElementById('joystick-thumb');
   const base = document.getElementById('joystick-base');
-  let touching = false;
-  const centerX = 60, centerY = 60;
-  const maxDist = 40;
+  const maxDist = 60;  // finger travel for full speed — generous for small hands
+  const dead = 8;      // ignore tiny wobble so the horse doesn't drift/jitter
 
-  function handleTouch(e) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = base.getBoundingClientRect();
-    const dx = touch.clientX - (rect.left + rect.width / 2);
-    const dy = touch.clientY - (rect.top + rect.height / 2);
-    const dist = Math.min(Math.sqrt(dx * dx + dy * dy), maxDist);
-    const angle = Math.atan2(dy, dx);
+  // Pointer Events give us a stable per-finger id. Tracking ONE id fixes the old
+  // touches[0] bug where resting a second finger — or tapping an action button —
+  // yanked the stick to the wrong finger.
+  let activeId = null, originX = 0, originY = 0;
 
-    const nx = Math.cos(angle) * dist;
-    const ny = Math.sin(angle) * dist;
+  const place = (el, x, y) => { el.style.left = x + 'px'; el.style.top = y + 'px'; };
+  const idlePos = () => ({ x: 96, y: window.innerHeight - 108 });
 
-    thumb.style.left = (centerX - 25 + nx) + 'px';
-    thumb.style.top = (centerY - 25 + ny) + 'px';
-
-    joystickDir.x = nx / maxDist;
-    joystickDir.y = ny / maxDist;
+  // Faint resting stick in the corner so kids/parents see where to steer; it
+  // jumps to wherever they actually press.
+  function showIdle() {
+    const p = idlePos();
+    place(base, p.x, p.y); place(thumb, p.x, p.y);
+    base.style.opacity = '0.22'; thumb.style.opacity = '0.32';
   }
+  showIdle();
+  window.addEventListener('resize', () => { if (activeId === null) showIdle(); });
 
-  area.addEventListener('touchstart', (e) => {
-    touching = true;
-    handleTouch(e);
-  }, { passive: false });
+  area.addEventListener('pointerdown', (e) => {
+    if (activeId !== null) return; // one stick at a time; ignore extra fingers
+    activeId = e.pointerId;
+    if (area.setPointerCapture) area.setPointerCapture(e.pointerId);
+    originX = e.clientX; originY = e.clientY;
+    place(base, originX, originY); place(thumb, originX, originY);
+    base.style.opacity = '0.85'; thumb.style.opacity = '0.95';
+    joystickDir.x = 0; joystickDir.y = 0;
+    e.preventDefault();
+  });
 
-  area.addEventListener('touchmove', (e) => {
-    if (touching) handleTouch(e);
-  }, { passive: false });
+  area.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== activeId) return;
+    let dx = e.clientX - originX, dy = e.clientY - originY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > maxDist) { dx = dx / dist * maxDist; dy = dy / dist * maxDist; }
+    place(thumb, originX + dx, originY + dy);
+    if (dist < dead) { joystickDir.x = 0; joystickDir.y = 0; }
+    else { joystickDir.x = dx / maxDist; joystickDir.y = dy / maxDist; }
+    e.preventDefault();
+  });
 
-  const resetJoystick = () => {
-    touching = false;
-    thumb.style.left = (centerX - 25) + 'px';
-    thumb.style.top = (centerY - 25) + 'px';
-    joystickDir.x = 0;
-    joystickDir.y = 0;
+  const end = (e) => {
+    if (e.pointerId !== activeId) return;
+    activeId = null;
+    joystickDir.x = 0; joystickDir.y = 0;
+    showIdle();
   };
-
-  area.addEventListener('touchend', resetJoystick);
-  area.addEventListener('touchcancel', resetJoystick);
+  area.addEventListener('pointerup', end);
+  area.addEventListener('pointercancel', end);
 }
 
 // ===== Mobile action buttons =====
