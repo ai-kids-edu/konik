@@ -5049,10 +5049,14 @@ function initJoystick() {
   showIdle();
   window.addEventListener('resize', () => { if (activeId === null) showIdle(); });
 
+  const reset = () => { activeId = null; joystickDir.x = 0; joystickDir.y = 0; showIdle(); };
+
   area.addEventListener('pointerdown', (e) => {
     if (activeId !== null) return; // one stick at a time; ignore extra fingers
     activeId = e.pointerId;
-    if (area.setPointerCapture) area.setPointerCapture(e.pointerId);
+    // Capture lets the thumb drag beyond the zone and still steer. Guard it: a
+    // throw must not leave activeId set with no capture (which would wedge input).
+    try { if (area.setPointerCapture) area.setPointerCapture(e.pointerId); } catch (_) {}
     originX = e.clientX; originY = e.clientY;
     place(base, originX, originY); place(thumb, originX, originY);
     base.style.opacity = '0.85'; thumb.style.opacity = '0.95';
@@ -5071,14 +5075,13 @@ function initJoystick() {
     e.preventDefault();
   });
 
-  const end = (e) => {
-    if (e.pointerId !== activeId) return;
-    activeId = null;
-    joystickDir.x = 0; joystickDir.y = 0;
-    showIdle();
-  };
+  const end = (e) => { if (e.pointerId === activeId) reset(); };
   area.addEventListener('pointerup', end);
   area.addEventListener('pointercancel', end);
+  // Backstop: if the terminating pointerup/cancel is ever dropped, capture loss
+  // still fires here, so the stick can never get stuck "held" and wedge steering
+  // for the rest of the session.
+  area.addEventListener('lostpointercapture', end);
 }
 
 // ===== Mobile action buttons =====
@@ -5109,22 +5112,25 @@ function computeMobileActions() {
   const consumables = [];
   const contextual = [];
 
-  // Buy button first — for the nearest active counter, matching attemptBuyItem
-  // which only lets you buy from the nearest zone. Built up front so we know
-  // which item is being bought and can hide its duplicate consume button below.
+  // Which item's stall are we standing at? Derived from the zone itself, NOT
+  // from whether we can afford it — otherwise the consume button below would
+  // flicker in and out as the coin balance crosses the price. buyBtn (the actual
+  // buy button) still requires affordability; buyingItem only gates the
+  // duplicate-emoji suppression so it's stable regardless of coins.
   const z = currentActiveZone;
+  const buyingItem = (z && z.kind === 'buy') ? z.itemKey : null;
   let buyBtn = null;
-  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
+  if (buyingItem && Economy.canBuy(z.itemKey)) {
     const it = SHOP_ITEMS[z.itemKey];
     buyBtn = { id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
       badge: it.price === 0 ? '🎁' : it.price + '🪙',
       action: () => attemptBuyItem(z.itemKey) };
   }
-  const buyingItem = buyBtn ? z.itemKey : null;
 
   // Consumables — only when owned. Same emoji as the item so it's recognisable.
-  // Skip the one whose buy button is showing at this stall, so a non-reader
-  // never faces two identical emoji (e.g. a 🎇 that buys vs a 🎇 that detonates).
+  // Skip the one for the stall we're standing at (whether or not we can afford
+  // it), so a non-reader never faces two identical emoji at once (e.g. a 🎇 that
+  // buys vs a 🎇 that detonates). Step away from the stall to use a saved one.
   if ((inventory.siano || 0) > 0 && buyingItem !== 'siano')
     consumables.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
   if ((inventory.napoj || 0) > 0 && buyingItem !== 'napoj')
@@ -5176,12 +5182,21 @@ function updateMobileButtons() {
     btn.className = 'mobile-btn' + (b.glow ? ' glow' : '');
     btn.innerHTML = b.emoji + (b.badge ? `<span class="badge">${b.badge}</span>` : '');
     // Fire on pointerdown — one event per press across touch, mouse and pen, so
-    // a single tap can never double-fire cooldown-free actions (jump, firework).
-    // This deliberately avoids binding both touchstart and click: the synthetic
-    // click that follows touchstart could land on a *rebuilt* button and trigger
-    // the wrong action. preventDefault suppresses that compat click and any
-    // scroll/zoom; stopPropagation keeps it off the canvas/joystick.
-    const fire = (e) => { e.preventDefault(); e.stopPropagation(); b.action(); };
+    // the same tap can never double-fire (unlike touchstart+click, whose
+    // synthetic click could even land on a rebuilt button). preventDefault
+    // suppresses the compat click and any scroll/zoom; stopPropagation keeps it
+    // off the canvas/joystick. A 250ms per-button debounce absorbs a clumsy
+    // double-tap so eat/drink/firework (which have no cooldown of their own)
+    // aren't consumed twice; buy/sell already rate-limit themselves. Safe and
+    // simple now: one event type on an element that persists across rebuilds
+    // while its action stays available, so `last` isn't reset out from under us.
+    let last = -1e9;
+    const fire = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.timeStamp - last < 250) return;
+      last = e.timeStamp;
+      b.action();
+    };
     btn.addEventListener('pointerdown', fire);
     container.appendChild(btn);
   }
