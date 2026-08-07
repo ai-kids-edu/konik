@@ -55,6 +55,16 @@ canvas { display: block; }
   text-shadow: 0 0 20px rgba(0,0,0,0.8); pointer-events: none;
 }
 
+/* On small screens the overlay boxes were sized for a laptop and swallowed the
+   whole view. Shrink them uniformly via transform (keeping their centering) so
+   the box hugs its content — emojis included — without rewriting every inline
+   size. Gated on `body.compact` (touch AND a small viewport, set in initInput),
+   not merely touch, so big tablets — a supported target — keep readable UI.
+   The action buttons now carry the "what to do" cue, so the text can be small. */
+body.compact #question-bar {
+  transform: translateX(-50%) scale(0.72); transform-origin: top center;
+}
+
 #intro {
   position: fixed; inset: 0;
   background: linear-gradient(170deg, #87CEEB 0%, #a8e6ff 25%, #90d48a 50%, #5aad3a 75%, #3a7a25 100%);
@@ -133,6 +143,65 @@ canvas { display: block; }
   transition: none;
 }
 
+/* Mobile action buttons — right-side stack, opposite the joystick.
+   Kids can't read, so every button is a single big emoji. They appear
+   contextually (buy/sell near a counter, consume when owned) plus a
+   persistent jump button. Only shown on touch devices. */
+/* On mobile the minimap shares the bottom-right corner with the action
+   buttons, so shrink it a touch to free vertical room for the stack. The
+   minimap keeps its base bottom:15px; --mm-size is the single source of truth
+   for its size, and the button stack derives its offset from it via calc() so
+   the two can never drift out of sync. */
+body.mobile { --mm-size: 120px; }
+body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
+#mobile-actions {
+  /* Sits just above the minimap (its bottom + size + a gap) so the two never
+     overlap. Grows upward; the jump button stays pinned at the bottom. */
+  position: fixed; bottom: calc(15px + var(--mm-size, 120px) + 13px); right: 16px;
+  z-index: 12; display: none;
+  flex-direction: column; align-items: flex-end; gap: 12px;
+}
+.mobile-btn {
+  width: 78px; height: 78px; border-radius: 50%;
+  background: rgba(0,0,0,0.42);
+  border: 4px solid rgba(255,255,255,0.55);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 42px; line-height: 1; position: relative;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: transform 0.08s;
+}
+.mobile-btn:active { transform: scale(0.9); background: rgba(0,0,0,0.6); }
+/* Phone-sized screens have little room around the minimap, so shrink everything
+   in the bottom-right corner to keep the button stack on-screen. Covers both
+   landscape phones (short height) and portrait phones (narrow width); tablets
+   (>=~min 520px edge) keep the full-size layout, which has room to spare. */
+@media (max-height: 520px), (max-width: 480px) {
+  body.mobile { --mm-size: 88px; } /* button offset follows via calc() */
+  #mobile-actions { gap: 6px; }
+  .mobile-btn { width: 58px; height: 58px; font-size: 31px; border-width: 3px; }
+  .mobile-btn .badge { font-size: 15px; padding: 1px 5px; }
+}
+.mobile-btn.glow {
+  border-color: rgba(255,220,120,0.95);
+  animation: mobile-btn-pulse 0.9s ease-in-out infinite;
+}
+@keyframes mobile-btn-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0 0 rgba(255,220,120,0.6); }
+  50% { box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 22px 6px rgba(255,220,120,0.85); }
+}
+/* Little coin corner-badge marks a buy button so it reads as "costs money"
+   and won't be confused with the same-emoji consume button. */
+.mobile-btn .badge {
+  position: absolute; top: -6px; right: -6px;
+  background: #ffd944; color: #3a1d08;
+  border-radius: 12px; padding: 1px 7px;
+  font-size: 20px; font-weight: 900;
+  box-shadow: 0 2px 0 #b89040;
+  display: flex; align-items: center; gap: 2px;
+}
+
 #pause-overlay {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.5);
@@ -205,6 +274,8 @@ canvas { display: block; }
   <div id="joystick-base"></div>
   <div id="joystick-thumb"></div>
 </div>
+
+<div id="mobile-actions"></div>
 
 <script type="importmap">
 {
@@ -407,6 +478,10 @@ let challengeCooldown = 0;
 const keys = {};
 let joystickDir = { x: 0, y: 0 };
 let isMobile = false;
+// compactUI: shrink the overlay boxes only on genuinely small screens. Touch
+// alone isn't enough — a big tablet is a supported target and shouldn't get
+// 60% UI. Set alongside isMobile in initInput.
+let compactUI = false;
 
 // Tree positions (for collision avoidance)
 let treePositions = [];
@@ -1171,6 +1246,17 @@ function handColor(keyLetter) {
   return LEFT_HAND_LETTERS.has(keyLetter) ? '#7cc8ff' : '#8dea8d';
 }
 
+// "How to trigger this action" markup. On desktop it names the key + which hand;
+// on mobile (no keyboard) it points at the glowing action button on the right.
+function actionHintHTML(keyLabel, kbdStyle) {
+  if (isMobile) {
+    return `<span style="font-size:52px;vertical-align:middle">👉</span>`
+      + `<span style="font-size:26px;font-weight:800;opacity:0.9;margin-left:6px">dotknij przycisku</span>`;
+  }
+  return `<span style="${kbdStyle}">${keyLabel}</span>`
+    + `<span style="font-size:24px;color:${handColor(keyLabel)};font-weight:800;opacity:0.9">${handLabel(keyLabel)} ręką</span>`;
+}
+
 // Per-frame HUD writers used to re-parse identical HTML every frame. Cache the
 // last string per element so we only touch innerHTML when it actually changes.
 const __htmlCache = new WeakMap();
@@ -1224,7 +1310,12 @@ let sellPromptEl = null;
 function updateInteractionPrompt(activeZone) {
   if (!sellPromptEl) {
     sellPromptEl = document.createElement('div');
-    sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;transform:translateX(-50%);'
+    // On small screens the box is scaled down (and anchored to its top) so it
+    // stops covering the play area; the action button already shows what to do.
+    const scaleTf = compactUI
+      ? 'transform:translateX(-50%) scale(0.6);transform-origin:top center;'
+      : 'transform:translateX(-50%);';
+    sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;' + scaleTf
       + 'background:rgba(0,0,0,0.72);color:#fff;padding:24px 40px;border-radius:24px;'
       + 'font-size:44px;font-weight:800;pointer-events:none;z-index:150;text-align:center;'
       + 'border:4px solid rgba(255,220,120,0.9);box-shadow:0 10px 40px rgba(0,0,0,0.6);'
@@ -1249,10 +1340,10 @@ function updateInteractionPrompt(activeZone) {
       html = '<div style="opacity:0.85">Nazbieraj <span style="font-size:60px">🥕</span> lub <span style="font-size:60px">🍎</span><br>i wróć tutaj sprzedać!</div>';
     } else {
       if (carrots > 0) {
-        html += `<div>Naciśnij <span style="${kbdStyle}">M</span> <span style="font-size:24px;color:${handColor('M')};font-weight:800;opacity:0.9">${handLabel('M')} ręką</span> żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
+        html += `<div>Naciśnij ${actionHintHTML('M', kbdStyle)} żeby sprzedać <span style="font-size:60px">🥕</span></div>`;
       }
       if (applesCollected > 0) {
-        html += `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">J</span> <span style="font-size:24px;color:${handColor('J')};font-weight:800;opacity:0.9">${handLabel('J')} ręką</span> żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
+        html += `<div style="margin-top:12px">Naciśnij ${actionHintHTML('J', kbdStyle)} żeby sprzedać <span style="font-size:60px">🍎</span></div>`;
       }
     }
   } else if (activeZone.kind === 'buy') {
@@ -1284,10 +1375,10 @@ function updateInteractionPrompt(activeZone) {
       html = `<div style="font-size:72px;line-height:1">💌</div>`
         + `<div style="margin-top:8px;font-size:40px;color:#ffdd77">Nowy list dla farmera!</div>`
         + `<div style="margin-top:8px;font-size:32px;opacity:0.9">Weź i dostarcz na farmę,<br>a dostaniesz nagrodę 🪙</div>`
-        + `<div style="margin-top:12px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span> <span style="font-size:24px;color:${handColor(it.keyLabel)};font-weight:800;opacity:0.9">${handLabel(it.keyLabel)} ręką</span></div>`;
+        + `<div style="margin-top:12px">Naciśnij ${actionHintHTML(it.keyLabel, kbdStyle)}</div>`;
     } else {
       html = `<div style="font-size:72px;line-height:1">${it.emoji}</div>`
-        + `<div style="margin-top:6px">Naciśnij <span style="${kbdStyle}">${it.keyLabel}</span> <span style="font-size:24px;color:${handColor(it.keyLabel)};font-weight:800;opacity:0.9">${handLabel(it.keyLabel)} ręką</span></div>`
+        + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(it.keyLabel, kbdStyle)}</div>`
         + `<div style="margin-top:10px;font-size:36px;opacity:0.9">${it.name} — ${priceHtml}</div>`;
     }
   }
@@ -1370,13 +1461,16 @@ function showTransientPopup(key, opts, html) {
     entry = _transientPopups[key] = { el, timer: 0 };
   }
   const { el } = entry;
+  // On small screens these feedback bubbles were laptop-sized and blanketed the
+  // view — shrink them so they read as a quick "+1" toast, not a full banner.
+  const f = compactUI ? 0.6 : 1;
   el.innerHTML = html;
   el.style.opacity = '1';
-  el.style.transform = `translate(-50%,-50%) scale(${popScale})`;
+  el.style.transform = `translate(-50%,-50%) scale(${popScale * f})`;
   if (entry.timer) clearTimeout(entry.timer);
   entry.timer = setTimeout(() => {
     el.style.opacity = '0';
-    el.style.transform = 'translate(-50%,-90%) scale(0.8)';
+    el.style.transform = `translate(-50%,-90%) scale(${0.8 * f})`;
     entry.timer = 0;
   }, duration);
 }
@@ -4897,6 +4991,13 @@ function initInput() {
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if (isMobile) {
     document.getElementById('joystick-area').style.display = 'block';
+    document.getElementById('mobile-actions').style.display = 'flex';
+    document.body.classList.add('mobile');
+    // Small screen (phone / small tablet) → shrink overlays. Uses the shorter
+    // viewport edge so it's orientation-independent; ~900px keeps 10" tablets
+    // compact but leaves 12.9" tablets at full size.
+    compactUI = Math.min(window.innerWidth, window.innerHeight) < 900;
+    if (compactUI) document.body.classList.add('compact');
     initJoystick();
   }
 
@@ -4964,6 +5065,111 @@ function initJoystick() {
 
   area.addEventListener('touchend', resetJoystick);
   area.addEventListener('touchcancel', resetJoystick);
+}
+
+// ===== Mobile action buttons =====
+// On phones/tablets there is no keyboard, so every keyboard-driven action needs
+// a tappable button. We rebuild the button set from the current context each
+// frame, but only touch the DOM when the set actually changes (keyed by a
+// signature string) so live buttons keep working and don't flicker.
+let mobileBtnSig = '';
+
+// Is there a farmer close enough to mount? (mirrors handleSpaceAction's radius)
+function nearMountableFarmer() {
+  for (const farmer of farmers) {
+    if (farmer.mounted) continue;
+    const fdx = horsePos.x - farmer.group.position.x;
+    const fdz = horsePos.z - farmer.group.position.z;
+    if (fdx * fdx + fdz * fdz < 36) return true; // 6m radius
+  }
+  return false;
+}
+
+// Build the list of action buttons that make sense right now.
+// Order matters: the stack is a bottom-anchored column, so earlier items sit
+// higher and are the first to clip off-screen-top if space runs out. We put the
+// always-available consumables first (top, least urgent) and the situational
+// buy/sell/farmer actions last, just above the bottom-pinned jump — so on a
+// cramped screen the important, in-the-moment actions stay within thumb reach.
+function computeMobileActions() {
+  const consumables = [];
+  const contextual = [];
+
+  // Consumables — only when owned. Same emoji as the item so it's recognisable.
+  if ((inventory.siano || 0) > 0)
+    consumables.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
+  if ((inventory.napoj || 0) > 0)
+    consumables.push({ id: 'drink', emoji: '🥤', action: attemptDrinkWater });
+  if ((inventory.fajerwerki || 0) > 0)
+    consumables.push({ id: 'fire', emoji: '🎇', action: consumeFajerwerki });
+
+  // Mount / dismount a farmer (Space on desktop). glow draws the kid's eye,
+  // like the 3D beacon pulse used for the same "useful now" cue.
+  if (ridingFarmer) {
+    contextual.push({ id: 'farmer:down', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+  } else if (nearMountableFarmer()) {
+    contextual.push({ id: 'farmer:up', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+  }
+  // Sell buttons — keyed off sellZone.inZone directly (like attemptSellItem),
+  // NOT the nearest zone. The sell and siano-buy counters overlap, so the
+  // nearest zone is often the buy one; gating sell on "nearest" would leave a
+  // mobile kid standing in the overlap unable to sell what a desktop kid can.
+  if (sellZone && sellZone.inZone) {
+    if (carrots > 0) contextual.push({ id: 'sell:carrot', emoji: '🥕', glow: true,
+      action: () => attemptSellItem('carrot') });
+    if (applesCollected > 0) contextual.push({ id: 'sell:apple', emoji: '🍎', glow: true,
+      action: () => attemptSellItem('apple') });
+  }
+  // Buy button — for the nearest active counter, matching attemptBuyItem which
+  // only lets you buy from the nearest zone. Placed last (nearest the thumb).
+  const z = currentActiveZone;
+  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
+    const it = SHOP_ITEMS[z.itemKey];
+    contextual.push({ id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
+      badge: it.price === 0 ? '🎁' : it.price + '🪙',
+      action: () => attemptBuyItem(z.itemKey) });
+  }
+
+  const list = [...consumables, ...contextual];
+
+  // Jump — always available, so always the bottom-most button.
+  list.push({ id: 'jump', emoji: '⤴️', action: attemptJump });
+
+  return list;
+}
+
+function updateMobileButtons() {
+  if (!isMobile) return;
+  const container = document.getElementById('mobile-actions');
+  if (!container) return;
+
+  const list = computeMobileActions();
+  const sig = list.map(b => b.id + (b.glow ? '!' : '') + (b.badge || '')).join('|');
+  if (sig === mobileBtnSig) return; // nothing changed — leave live buttons alone
+  mobileBtnSig = sig;
+
+  container.innerHTML = '';
+  for (const b of list) {
+    const btn = document.createElement('div');
+    btn.className = 'mobile-btn' + (b.glow ? ' glow' : '');
+    btn.innerHTML = b.emoji + (b.badge ? `<span class="badge">${b.badge}</span>` : '');
+    // Fire on touchstart for snappy feel; stop the event so it never reaches
+    // the canvas or joystick. Click is kept as a fallback (mouse testing), but a
+    // per-button recency guard drops the synthetic click that follows a
+    // touchstart — otherwise a single tap could double-fire cooldown-free
+    // actions (a second jump, a wasted firework). e.timeStamp is monotonic and
+    // shared across both event types, so no clock API is needed.
+    let lastFire = -1e9;
+    const fire = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.timeStamp - lastFire < 400) return;
+      lastFire = e.timeStamp;
+      b.action();
+    };
+    btn.addEventListener('touchstart', fire, { passive: false });
+    btn.addEventListener('click', fire);
+    container.appendChild(btn);
+  }
 }
 
 function getInput() {
@@ -5043,9 +5249,14 @@ function updateCarrotHUD() {
         + `<span style="color:#fff;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${n}</span>`;
       const action = CONSUMABLE_ACTIONS[k];
       if (action) {
-        row += `<span style="${badgeStyle};border:2px solid ${handColor(action.key)}">${action.key}</span>`
-          + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`
-          + `<span style="font-size:18px;color:${handColor(action.key)};font-weight:800;opacity:0.9;margin-left:2px">${handLabel(action.key)} ręką</span>`;
+        if (isMobile) {
+          row += `<span style="font-size:32px">👉</span>`
+            + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`;
+        } else {
+          row += `<span style="${badgeStyle};border:2px solid ${handColor(action.key)}">${action.key}</span>`
+            + `<span style="color:#fff;font-size:28px;text-shadow:1px 1px 0 rgba(0,0,0,0.5)">${action.verb}</span>`
+            + `<span style="font-size:18px;color:${handColor(action.key)};font-weight:800;opacity:0.9;margin-left:2px">${handLabel(action.key)} ręką</span>`;
+        }
       }
       row += `</div>`;
       html += row;
@@ -5055,17 +5266,20 @@ function updateCarrotHUD() {
   // Controls hint below inventory — separate visually so kid doesn't
   // read it as an owned item. Persistent so jump is always discoverable.
   html += `<div class="row" style="margin-top:10px;padding-top:8px;border-top:2px solid rgba(255,255,255,0.25);font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
-    + `<span style="${badgeStyle};border:2px solid ${handColor('E')}">E</span>`
-    + `<span>skok konia</span>`
-    + `<span style="font-size:18px;color:${handColor('E')};font-weight:800;opacity:0.9;margin-left:2px">${handLabel('E')} ręką</span>`
+    + (isMobile
+        ? `<span style="font-size:32px">⤴️</span><span>skok konia</span>`
+        : `<span style="${badgeStyle};border:2px solid ${handColor('E')}">E</span>`
+          + `<span>skok konia</span>`
+          + `<span style="font-size:18px;color:${handColor('E')};font-weight:800;opacity:0.9;margin-left:2px">${handLabel('E')} ręką</span>`)
     + `</div>`;
-  // Sprint hint — Left Shift is a left-hand control; shift is not a letter
-  // so the badge shows "Shift" spelled out.
-  html += `<div class="row" style="font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
-    + `<span style="${badgeStyle};border:2px solid #7cc8ff;font-size:22px">Shift</span>`
-    + `<span>sprint (⚡)</span>`
-    + `<span style="font-size:18px;color:#7cc8ff;font-weight:800;opacity:0.9;margin-left:2px">lewą ręką</span>`
-    + `</div>`;
+  // Sprint hint — desktop only (Shift has no touch equivalent).
+  if (!isMobile) {
+    html += `<div class="row" style="font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
+      + `<span style="${badgeStyle};border:2px solid #7cc8ff;font-size:22px">Shift</span>`
+      + `<span>sprint (⚡)</span>`
+      + `<span style="font-size:18px;color:#7cc8ff;font-weight:800;opacity:0.9;margin-left:2px">lewą ręką</span>`
+      + `</div>`;
+  }
 
   hud.innerHTML = html || '&nbsp;';
 
@@ -5572,6 +5786,7 @@ function update() {
   animateFireworks(dt);
   animateSprintSparkles(dt);
   updateInteractionZones(dt);
+  updateMobileButtons();
   updateLetterDelivery(dt);
   updatePassengerQuests(dt);
   updateStaminaBar();
