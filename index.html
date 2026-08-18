@@ -127,20 +127,54 @@ body.compact #question-bar {
 #intro button:hover { transform: scale(1.08); box-shadow: 0 8px 35px rgba(255,100,50,0.6); }
 #intro button:active { transform: scale(0.95); }
 
+/* Floating joystick: the whole lower-left of the screen is the active zone, so a
+   child never has to aim for a small circle — the stick appears wherever they
+   press. base/thumb are position:fixed and placed by JS at the touch point.
+   touch-action:none stops the browser hijacking the drag as a scroll/gesture. */
 #joystick-area {
-  position: fixed; bottom: 20px; left: 20px; width: 160px; height: 160px;
-  z-index: 10; display: none;
+  position: fixed; left: 0; bottom: 0; width: 55vw; height: 80vh;
+  z-index: 10; display: none; touch-action: none;
 }
 #joystick-base {
-  width: 140px; height: 140px; border-radius: 50%;
-  background: rgba(255,255,255,0.12); border: 3px solid rgba(255,255,255,0.25);
-  position: absolute; bottom: 0; left: 0;
+  position: fixed; width: 160px; height: 160px; border-radius: 50%;
+  background: rgba(255,255,255,0.12); border: 4px solid rgba(255,255,255,0.35);
+  transform: translate(-50%, -50%); pointer-events: none;
+  opacity: 0; transition: opacity 0.12s;
 }
 #joystick-thumb {
-  width: 60px; height: 60px; border-radius: 50%;
-  background: rgba(255,255,255,0.35);
-  position: absolute; bottom: 40px; left: 40px;
-  transition: none;
+  position: fixed; width: 78px; height: 78px; border-radius: 50%;
+  background: rgba(255,255,255,0.42); border: 3px solid rgba(255,255,255,0.5);
+  transform: translate(-50%, -50%); pointer-events: none;
+  opacity: 0; transition: opacity 0.12s;
+}
+
+/* Steering feedback bar (bottom-centre). A "keep the ball in the middle" meter:
+   the marker slides toward the turn direction and shifts green->orange with
+   strength; centred + green means straight. Fades in only while moving. */
+#steer-indicator {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  width: 200px; height: 40px; z-index: 11;
+  background: rgba(0,0,0,0.38); border-radius: 20px;
+  border: 3px solid rgba(255,255,255,0.28);
+  opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+#steer-indicator .chev {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  font-size: 22px; font-weight: 900; color: #fff; opacity: 0.4;
+}
+#steer-indicator .chev.l { left: 12px; }
+#steer-indicator .chev.r { right: 12px; }
+#steer-tick {
+  position: absolute; left: 50%; top: 9px; bottom: 9px; width: 3px;
+  margin-left: -1.5px; background: rgba(255,255,255,0.55); border-radius: 2px;
+}
+#steer-marker {
+  position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
+  border-radius: 50%; background: #4ade5c;
+  border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 0 8px rgba(0,0,0,0.4);
+  transform: translate(-50%, -50%);
+  transition: transform 0.08s linear, background 0.12s linear;
 }
 
 /* Mobile action buttons — right-side stack, opposite the joystick.
@@ -276,6 +310,15 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 </div>
 
 <div id="mobile-actions"></div>
+
+<!-- Steering feedback: marker sits centred + green when going straight, slides
+     left/right and turns orange to show which way / how hard we're turning. -->
+<div id="steer-indicator">
+  <span class="chev l">‹</span>
+  <div id="steer-tick"></div>
+  <div id="steer-marker"></div>
+  <span class="chev r">›</span>
+</div>
 
 <script type="importmap">
 {
@@ -5023,48 +5066,60 @@ function initJoystick() {
   const area = document.getElementById('joystick-area');
   const thumb = document.getElementById('joystick-thumb');
   const base = document.getElementById('joystick-base');
-  let touching = false;
-  const centerX = 60, centerY = 60;
-  const maxDist = 40;
+  const maxDist = 60;  // finger travel for full speed — generous for small hands
+  const dead = 8;      // ignore tiny wobble so the horse doesn't drift/jitter
 
-  function handleTouch(e) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = base.getBoundingClientRect();
-    const dx = touch.clientX - (rect.left + rect.width / 2);
-    const dy = touch.clientY - (rect.top + rect.height / 2);
-    const dist = Math.min(Math.sqrt(dx * dx + dy * dy), maxDist);
-    const angle = Math.atan2(dy, dx);
+  // Pointer Events give us a stable per-finger id. Tracking ONE id fixes the old
+  // touches[0] bug where resting a second finger — or tapping an action button —
+  // yanked the stick to the wrong finger.
+  let activeId = null, originX = 0, originY = 0;
 
-    const nx = Math.cos(angle) * dist;
-    const ny = Math.sin(angle) * dist;
+  const place = (el, x, y) => { el.style.left = x + 'px'; el.style.top = y + 'px'; };
+  const idlePos = () => ({ x: 96, y: window.innerHeight - 108 });
 
-    thumb.style.left = (centerX - 25 + nx) + 'px';
-    thumb.style.top = (centerY - 25 + ny) + 'px';
-
-    joystickDir.x = nx / maxDist;
-    joystickDir.y = ny / maxDist;
+  // Faint resting stick in the corner so kids/parents see where to steer; it
+  // jumps to wherever they actually press.
+  function showIdle() {
+    const p = idlePos();
+    place(base, p.x, p.y); place(thumb, p.x, p.y);
+    base.style.opacity = '0.22'; thumb.style.opacity = '0.32';
   }
+  showIdle();
+  window.addEventListener('resize', () => { if (activeId === null) showIdle(); });
 
-  area.addEventListener('touchstart', (e) => {
-    touching = true;
-    handleTouch(e);
-  }, { passive: false });
+  const reset = () => { activeId = null; joystickDir.x = 0; joystickDir.y = 0; showIdle(); };
 
-  area.addEventListener('touchmove', (e) => {
-    if (touching) handleTouch(e);
-  }, { passive: false });
+  area.addEventListener('pointerdown', (e) => {
+    if (activeId !== null) return; // one stick at a time; ignore extra fingers
+    activeId = e.pointerId;
+    // Capture lets the thumb drag beyond the zone and still steer. Guard it: a
+    // throw must not leave activeId set with no capture (which would wedge input).
+    try { if (area.setPointerCapture) area.setPointerCapture(e.pointerId); } catch (_) {}
+    originX = e.clientX; originY = e.clientY;
+    place(base, originX, originY); place(thumb, originX, originY);
+    base.style.opacity = '0.85'; thumb.style.opacity = '0.95';
+    joystickDir.x = 0; joystickDir.y = 0;
+    e.preventDefault();
+  });
 
-  const resetJoystick = () => {
-    touching = false;
-    thumb.style.left = (centerX - 25) + 'px';
-    thumb.style.top = (centerY - 25) + 'px';
-    joystickDir.x = 0;
-    joystickDir.y = 0;
-  };
+  area.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== activeId) return;
+    let dx = e.clientX - originX, dy = e.clientY - originY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > maxDist) { dx = dx / dist * maxDist; dy = dy / dist * maxDist; }
+    place(thumb, originX + dx, originY + dy);
+    if (dist < dead) { joystickDir.x = 0; joystickDir.y = 0; }
+    else { joystickDir.x = dx / maxDist; joystickDir.y = dy / maxDist; }
+    e.preventDefault();
+  });
 
-  area.addEventListener('touchend', resetJoystick);
-  area.addEventListener('touchcancel', resetJoystick);
+  const end = (e) => { if (e.pointerId === activeId) reset(); };
+  area.addEventListener('pointerup', end);
+  area.addEventListener('pointercancel', end);
+  // Backstop: if the terminating pointerup/cancel is ever dropped, capture loss
+  // still fires here, so the stick can never get stuck "held" and wedge steering
+  // for the rest of the session.
+  area.addEventListener('lostpointercapture', end);
 }
 
 // ===== Mobile action buttons =====
@@ -5095,12 +5150,30 @@ function computeMobileActions() {
   const consumables = [];
   const contextual = [];
 
+  // Which item's stall are we standing at? Derived from the zone itself, NOT
+  // from whether we can afford it — otherwise the consume button below would
+  // flicker in and out as the coin balance crosses the price. buyBtn (the actual
+  // buy button) still requires affordability; buyingItem only gates the
+  // duplicate-emoji suppression so it's stable regardless of coins.
+  const z = currentActiveZone;
+  const buyingItem = (z && z.kind === 'buy') ? z.itemKey : null;
+  let buyBtn = null;
+  if (buyingItem && Economy.canBuy(z.itemKey)) {
+    const it = SHOP_ITEMS[z.itemKey];
+    buyBtn = { id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
+      badge: it.price === 0 ? '🎁' : it.price + '🪙',
+      action: () => attemptBuyItem(z.itemKey) };
+  }
+
   // Consumables — only when owned. Same emoji as the item so it's recognisable.
-  if ((inventory.siano || 0) > 0)
+  // Skip the one for the stall we're standing at (whether or not we can afford
+  // it), so a non-reader never faces two identical emoji at once (e.g. a 🎇 that
+  // buys vs a 🎇 that detonates). Step away from the stall to use a saved one.
+  if ((inventory.siano || 0) > 0 && buyingItem !== 'siano')
     consumables.push({ id: 'eat', emoji: '🌾', action: attemptEatHay });
-  if ((inventory.napoj || 0) > 0)
+  if ((inventory.napoj || 0) > 0 && buyingItem !== 'napoj')
     consumables.push({ id: 'drink', emoji: '🥤', action: attemptDrinkWater });
-  if ((inventory.fajerwerki || 0) > 0)
+  if ((inventory.fajerwerki || 0) > 0 && buyingItem !== 'fajerwerki')
     consumables.push({ id: 'fire', emoji: '🎇', action: consumeFajerwerki });
 
   // Mount / dismount a farmer (Space on desktop). glow draws the kid's eye,
@@ -5120,15 +5193,8 @@ function computeMobileActions() {
     if (applesCollected > 0) contextual.push({ id: 'sell:apple', emoji: '🍎', glow: true,
       action: () => attemptSellItem('apple') });
   }
-  // Buy button — for the nearest active counter, matching attemptBuyItem which
-  // only lets you buy from the nearest zone. Placed last (nearest the thumb).
-  const z = currentActiveZone;
-  if (z && z.kind === 'buy' && Economy.canBuy(z.itemKey)) {
-    const it = SHOP_ITEMS[z.itemKey];
-    contextual.push({ id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
-      badge: it.price === 0 ? '🎁' : it.price + '🪙',
-      action: () => attemptBuyItem(z.itemKey) });
-  }
+  // Buy button goes last (nearest the thumb).
+  if (buyBtn) contextual.push(buyBtn);
 
   const list = [...consumables, ...contextual];
 
@@ -5136,6 +5202,26 @@ function computeMobileActions() {
   list.push({ id: 'jump', emoji: '⤴️', action: attemptJump });
 
   return list;
+}
+
+// Drive the bottom-centre steering meter from the current turn value. Marker
+// centred + green = straight; it slides toward the turn direction and shifts
+// toward orange (and grows) with strength. Fades out when the horse is still.
+let _steerEls = null;
+function updateSteerIndicator(turn, moving) {
+  if (!_steerEls) _steerEls = {
+    box: document.getElementById('steer-indicator'),
+    marker: document.getElementById('steer-marker'),
+  };
+  const { box, marker } = _steerEls;
+  if (!box || !marker) return;
+  box.style.opacity = moving ? '1' : '0';
+  const t = Math.max(-1, Math.min(1, turn));   // +t = turning left
+  const mag = Math.abs(t);
+  const offset = -t * 74;                       // px from centre (left = negative)
+  const scale = 1 + mag * 0.25;
+  marker.style.transform = `translate(calc(-50% + ${offset.toFixed(1)}px), -50%) scale(${scale.toFixed(2)})`;
+  marker.style.background = `hsl(${(130 - 100 * mag).toFixed(0)}, 80%, 55%)`; // green→orange
 }
 
 function updateMobileButtons() {
@@ -5153,46 +5239,59 @@ function updateMobileButtons() {
     const btn = document.createElement('div');
     btn.className = 'mobile-btn' + (b.glow ? ' glow' : '');
     btn.innerHTML = b.emoji + (b.badge ? `<span class="badge">${b.badge}</span>` : '');
-    // Fire on touchstart for snappy feel; stop the event so it never reaches
-    // the canvas or joystick. Click is kept as a fallback (mouse testing), but a
-    // per-button recency guard drops the synthetic click that follows a
-    // touchstart — otherwise a single tap could double-fire cooldown-free
-    // actions (a second jump, a wasted firework). e.timeStamp is monotonic and
-    // shared across both event types, so no clock API is needed.
-    let lastFire = -1e9;
+    // Fire on pointerdown — one event per press across touch, mouse and pen, so
+    // the same tap can never double-fire (unlike touchstart+click, whose
+    // synthetic click could even land on a rebuilt button). preventDefault
+    // suppresses the compat click and any scroll/zoom; stopPropagation keeps it
+    // off the canvas/joystick. A 250ms per-button debounce absorbs a clumsy
+    // double-tap so eat/drink/firework (which have no cooldown of their own)
+    // aren't consumed twice; buy/sell already rate-limit themselves. Safe and
+    // simple now: one event type on an element that persists across rebuilds
+    // while its action stays available, so `last` isn't reset out from under us.
+    let last = -1e9;
     const fire = (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (e.timeStamp - lastFire < 400) return;
-      lastFire = e.timeStamp;
+      if (e.timeStamp - last < 250) return;
+      last = e.timeStamp;
       b.action();
     };
-    btn.addEventListener('touchstart', fire, { passive: false });
-    btn.addEventListener('click', fire);
+    btn.addEventListener('pointerdown', fire);
     container.appendChild(btn);
   }
 }
 
 function getInput() {
-  let forward = 0, turn = 0;
+  let forward = 0, turn = 0, turnIntent = 0;
 
   // Freeze controls while eating
-  if (isEatingCarrots) return { forward: 0, turn: 0, moving: false };
+  if (isEatingCarrots) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
 
   if (keys['ArrowUp'] || keys['KeyW']) forward = 1;
   if (keys['ArrowDown'] || keys['KeyS']) forward = -1;
-  if (keys['ArrowLeft'] || keys['KeyA']) turn = 1;
-  if (keys['ArrowRight'] || keys['KeyD']) turn = -1;
+  if (keys['ArrowLeft'] || keys['KeyA']) { turn = 1; turnIntent = 1; }
+  if (keys['ArrowRight'] || keys['KeyD']) { turn = -1; turnIntent = -1; }
 
   if (isMobile) {
     forward += -joystickDir.y; // stick up = forward (negative y)
-    turn += -joystickDir.x;   // stick left = turn left (negative x)
+    const jx = -joystickDir.x; // stick left = turn left
+    // turnIntent tracks the raw sideways push — used for the "am I moving/
+    // turning" flag and the steering meter, so both reflect what the child does.
+    turnIntent += jx;
+    // Actual rotation is gentler: square the push (keeping its sign) and cap it
+    // below full, so small/moderate tilts turn softly and even a full push isn't
+    // twitchy. Keyboard turning is unchanged.
+    turn += Math.sign(jx) * jx * jx * 0.8;
   }
 
   forward = THREE.MathUtils.clamp(forward, -1, 1);
   turn = THREE.MathUtils.clamp(turn, -1, 1);
+  turnIntent = THREE.MathUtils.clamp(turnIntent, -1, 1);
 
-  const moving = Math.abs(forward) > 0.1 || Math.abs(turn) > 0.1;
-  return { forward, turn, moving };
+  // moving keys off the raw intent, not the softened turn — otherwise a moderate
+  // tilt (whose squared turn is <0.1) would rotate the horse while the game
+  // treated it as idle (idle animation, meter hidden).
+  const moving = Math.abs(forward) > 0.1 || Math.abs(turnIntent) > 0.1;
+  return { forward, turn, turnIntent, moving };
 }
 
 // ========== MINIMAP ==========
@@ -5579,6 +5678,9 @@ function update() {
   // Rotate horse (tank-style turning) — slower for easier aiming
   const turnSpeed = 2.0;
   horseAngle += input.turn * turnSpeed * dt;
+  // Meter shows the raw steering intent (full range) so a full push reads as a
+  // full turn, even though the horse itself rotates on the softened curve.
+  updateSteerIndicator(input.turnIntent, input.moving);
 
   // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
   isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
