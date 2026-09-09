@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 2, label: 'Czesanie' };
+const GAME_VERSION = { number: 3, label: 'Kokarda' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -1394,7 +1394,7 @@ function updateInteractionZones(dt) {
       } else if (zone.kind === 'buy') {
         cue = Economy.canBuy(zone.itemKey);
       } else if (zone.kind === 'groom') {
-        cue = money >= groomPrice();
+        cue = groomLevel < GROOM_MAX_LEVEL && money >= groomPrice();
       }
     }
     zone.beacon.material.emissiveIntensity = cue ? (0.6 + pulseT * 1.4) : 0.35;
@@ -1483,14 +1483,17 @@ function updateInteractionPrompt(activeZone) {
     }
   } else if (activeZone.kind === 'groom') {
     const price = groomPrice();
-    if (money < price) {
+    if (groomLevel >= GROOM_MAX_LEVEL) {
+      html = `<div style="font-size:72px;line-height:1">✨🐴✨</div>`
+        + `<div style="margin-top:12px;font-size:38px;color:#ffd9ec">Konik już piękny!</div>`;
+    } else if (money < price) {
       html = `<div style="font-size:72px;line-height:1">💈</div>`
         + `<div style="margin-top:14px;font-size:36px;color:#ffb0b0">Za mało monet 🪙</div>`
         + `<div style="margin-top:6px;font-size:32px;opacity:0.85">potrzeba <b>${price}</b>, masz <b>${money}</b></div>`;
     } else {
       html = `<div style="font-size:72px;line-height:1">💈</div>`
         + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(GROOM.keyLabel, kbdStyle)}</div>`
-        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Uczesaj konika — ${price} <span style="font-size:56px">🪙</span></div>`;
+        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Ucześ konika — ${price} <span style="font-size:56px">🪙</span></div>`;
     }
   }
   setHTMLIfChanged(sellPromptEl, html);
@@ -1560,6 +1563,24 @@ let isGrooming = false;
 const GROOM = { key: 'KeyG', keyLabel: 'G', basePrice: 15, durationMs: 8000 };
 function groomPrice() { return GROOM.basePrice * Math.pow(2, groomLevel); }
 
+const GROOM_MAX_LEVEL = 2;
+const RAINBOW_COLORS = [0xff3b30, 0xff9500, 0xffd60a, 0x34c759, 0x0a84ff, 0x5e5ce6, 0xbf5af2];
+
+let groomAccessories = null;
+function ensureGroomAccessories() {
+  if (groomAccessories || !horseGroup) return groomAccessories;
+  const bow = buildGroomBow();
+  bow.visible = false;
+  horseGroup.add(bow);
+  const rainbow = buildGroomRainbow();
+  rainbow.visible = false;
+  horseGroup.add(rainbow);
+  groomAccessories = { bow, rainbow };
+  return groomAccessories;
+}
+
+// Stage 1: glossy, tinted coat. Stage 2: a bow on the mane. Stage 3: a rainbow
+// mane crest and tail. Each stage keeps the ones below it.
 function applyGroomLook() {
   if (!horse || groomLevel < 1) return;
   const gloss = Math.min(0.45, 0.14 * groomLevel);
@@ -1572,6 +1593,42 @@ function applyGroomLook() {
       if (m.emissive) { m.emissive.setHex(0xffd9ec); m.emissiveIntensity = gloss; }
     });
   });
+  const acc = ensureGroomAccessories();
+  if (acc) {
+    acc.bow.visible = groomLevel >= 2;
+    acc.rainbow.visible = groomLevel >= 3;
+  }
+}
+
+function buildGroomBow() {
+  const bow = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xff4d94, roughness: 0.45, emissive: 0x551133, emissiveIntensity: 0.35 });
+  bow.add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat));
+  for (const s of [-1, 1]) {
+    const loop = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.26, 10), mat);
+    loop.position.set(s * 0.16, 0, 0);
+    loop.rotation.z = s * Math.PI / 2;
+    bow.add(loop);
+  }
+  bow.position.set(0, 2.15, 0.55);
+  return bow;
+}
+
+function buildGroomRainbow() {
+  const g = new THREE.Group();
+  RAINBOW_COLORS.forEach((color, i) => {
+    const strandMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4, roughness: 0.5 });
+    const t = i / (RAINBOW_COLORS.length - 1);
+    const crest = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.1), strandMat);
+    crest.position.set(0, 2.35 - t * 0.7, 0.75 - t * 0.55);
+    crest.rotation.x = -0.5;
+    g.add(crest);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 0.05), strandMat);
+    tail.position.set((i - 3) * 0.055, 1.35, -1.05);
+    tail.rotation.x = 0.4;
+    g.add(tail);
+  });
+  return g;
 }
 
 function activeGroomZone() {
@@ -1583,6 +1640,7 @@ function activeGroomZone() {
 
 function attemptGroom() {
   if (isGrooming || !activeGroomZone()) return;
+  if (groomLevel >= GROOM_MAX_LEVEL) return;
   const price = groomPrice();
   if (money < price) return;
   money -= price;
@@ -5469,7 +5527,7 @@ function computeMobileActions() {
       action: () => attemptSellItem('apple') });
   }
   // Groom button — at the salon, when the kid can afford it.
-  if (z && z.kind === 'groom' && money >= groomPrice()) {
+  if (z && z.kind === 'groom' && groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
     contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptGroom });
   }
   // Buy button goes last (nearest the thumb).
