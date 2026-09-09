@@ -277,6 +277,42 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
   text-shadow: 0 1px 2px rgba(0,0,0,0.9);
   pointer-events: none;
 }
+#grooming-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px;
+  background: radial-gradient(circle at center, rgba(120,34,66,0.35), rgba(40,10,25,0.78));
+  backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity 0.35s;
+}
+#grooming-overlay.show { opacity: 1; pointer-events: auto; }
+#grooming-overlay .groom-brush {
+  font-size: 130px; filter: drop-shadow(0 6px 16px rgba(0,0,0,0.5));
+  animation: groom-sweep 1.1s ease-in-out infinite;
+}
+@keyframes groom-sweep {
+  0%,100% { transform: translateX(-90px) rotate(-18deg); }
+  50%     { transform: translateX(90px) rotate(18deg); }
+}
+#grooming-overlay .groom-sparkles {
+  font-size: 46px; animation: groom-twinkle 0.8s ease-in-out infinite alternate;
+}
+@keyframes groom-twinkle {
+  from { opacity: 0.4; transform: scale(0.9); }
+  to   { opacity: 1;   transform: scale(1.12); }
+}
+#grooming-overlay .groom-caption {
+  font-size: 56px; font-weight: 900; color: #ffe3f1;
+  text-shadow: 0 3px 0 rgba(0,0,0,0.5);
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+#grooming-overlay .groom-bar {
+  width: 60%; max-width: 520px; height: 22px; border-radius: 12px;
+  background: rgba(0,0,0,0.45); overflow: hidden; border: 3px solid rgba(255,220,240,0.7);
+}
+#grooming-overlay .groom-bar-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #ff9ecb, #ffd9ec);
+}
 </style>
 </head>
 <body>
@@ -343,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 1, label: 'Fryzjer' };
+const GAME_VERSION = { number: 2, label: 'Czesanie' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -1357,6 +1393,8 @@ function updateInteractionZones(dt) {
         cue = carrots > 0 || applesCollected > 0;
       } else if (zone.kind === 'buy') {
         cue = Economy.canBuy(zone.itemKey);
+      } else if (zone.kind === 'groom') {
+        cue = money >= groomPrice();
       }
     }
     zone.beacon.material.emissiveIntensity = cue ? (0.6 + pulseT * 1.4) : 0.35;
@@ -1443,6 +1481,17 @@ function updateInteractionPrompt(activeZone) {
         + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(it.keyLabel, kbdStyle)}</div>`
         + `<div style="margin-top:10px;font-size:36px;opacity:0.9">${it.name} — ${priceHtml}</div>`;
     }
+  } else if (activeZone.kind === 'groom') {
+    const price = groomPrice();
+    if (money < price) {
+      html = `<div style="font-size:72px;line-height:1">💈</div>`
+        + `<div style="margin-top:14px;font-size:36px;color:#ffb0b0">Za mało monet 🪙</div>`
+        + `<div style="margin-top:6px;font-size:32px;opacity:0.85">potrzeba <b>${price}</b>, masz <b>${money}</b></div>`;
+    } else {
+      html = `<div style="font-size:72px;line-height:1">💈</div>`
+        + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(GROOM.keyLabel, kbdStyle)}</div>`
+        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Uczesaj konika — ${price} <span style="font-size:56px">🪙</span></div>`;
+    }
   }
   setHTMLIfChanged(sellPromptEl, html);
   sellPromptEl.style.opacity = '1';
@@ -1503,6 +1552,76 @@ function nearestLetterRecipient() {
     if (distanceSq < bestDistanceSq) { bestDistanceSq = distanceSq; best = farmer; }
   }
   return best;
+}
+
+// ===== SALON GROOMING =====
+let groomLevel = 0;
+let isGrooming = false;
+const GROOM = { key: 'KeyG', keyLabel: 'G', basePrice: 15, durationMs: 8000 };
+function groomPrice() { return GROOM.basePrice * Math.pow(2, groomLevel); }
+
+function applyGroomLook() {
+  if (!horse || groomLevel < 1) return;
+  const gloss = Math.min(0.45, 0.14 * groomLevel);
+  const roughness = Math.max(0.25, 0.9 - 0.16 * groomLevel);
+  horse.traverse(child => {
+    if (!child.isMesh || !child.material) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    mats.forEach(m => {
+      if ('roughness' in m) m.roughness = roughness;
+      if (m.emissive) { m.emissive.setHex(0xffd9ec); m.emissiveIntensity = gloss; }
+    });
+  });
+}
+
+function activeGroomZone() {
+  const zone = interactionZones.find(z => z.kind === 'groom' && z.inZone);
+  if (!zone) return null;
+  if (currentActiveZone && currentActiveZone !== zone) return null;
+  return zone;
+}
+
+function attemptGroom() {
+  if (isGrooming || !activeGroomZone()) return;
+  const price = groomPrice();
+  if (money < price) return;
+  money -= price;
+  updateCarrotHUD();
+  isGrooming = true;
+  showGroomingCutscene('✨ Upiększanie ✨', GROOM.durationMs);
+  setTimeout(() => {
+    isGrooming = false;
+    groomLevel += 1;
+    applyGroomLook();
+    spawnConfetti({ x: horsePos.x, y: horsePos.y + 2, z: horsePos.z });
+    hideGroomingCutscene();
+  }, GROOM.durationMs);
+}
+
+let groomingOverlayEl = null;
+function showGroomingCutscene(caption, durationMs) {
+  if (!groomingOverlayEl) {
+    groomingOverlayEl = document.createElement('div');
+    groomingOverlayEl.id = 'grooming-overlay';
+    groomingOverlayEl.innerHTML =
+      '<div class="groom-brush">🪮</div>'
+      + '<div class="groom-sparkles">✨ 🌟 ✨ 💫 ✨</div>'
+      + '<div class="groom-caption"></div>'
+      + '<div class="groom-bar"><div class="groom-bar-fill"></div></div>';
+    document.body.appendChild(groomingOverlayEl);
+  }
+  groomingOverlayEl.querySelector('.groom-caption').textContent = caption;
+  groomingOverlayEl.classList.add('show');
+  const fill = groomingOverlayEl.querySelector('.groom-bar-fill');
+  fill.style.transition = 'none';
+  fill.style.width = '0%';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    fill.style.transition = `width ${durationMs}ms linear`;
+    fill.style.width = '100%';
+  }));
+}
+function hideGroomingCutscene() {
+  if (groomingOverlayEl) groomingOverlayEl.classList.remove('show');
 }
 
 // Transient celebration popups (sell/buy/delivery/consume) share the same
@@ -2111,6 +2230,7 @@ function createWildWestTown() {
 
   // Townspeople — pickable like farmer
   // Use createTownsperson(x, z, faceAngle, type)
+  createTownsperson(-8, cz + 32, Math.PI / 2, 'hairdresser');    // outside salon
   createTownsperson(-8, cz + 14, Math.PI / 2, 'shopkeeper');     // outside saloon
   createTownsperson(8, cz + 16, -Math.PI / 2, 'sheriff');        // outside sheriff
   createTownsperson(-8, cz - 4, Math.PI / 2, 'merchant');        // outside store
@@ -2341,16 +2461,16 @@ function buildSalon(x, z, side) {
     }
   }
 
-  const overhang = 0.8;
+  const overhang = 0.8, pitch = 0.5;
   for (const slope of [-1, 1]) {
     const slab = new THREE.Mesh(new THREE.BoxGeometry(w + overhang * 2, 0.16, d / 2 + overhang), roofMat);
-    slab.position.set(0, postH + 0.7, slope * (d / 4));
-    slab.rotation.x = slope * -0.5;
+    slab.position.set(0, postH + 0.4, slope * (d / 4));
+    slab.rotation.x = slope * pitch; // inner edge up at the ridge, outer edge down = peak
     slab.castShadow = true;
     group.add(slab);
   }
   const ridge = new THREE.Mesh(new THREE.BoxGeometry(w + overhang * 2, 0.2, 0.2), trimMat);
-  ridge.position.set(0, postH + 1.35, 0);
+  ridge.position.set(0, postH + 1.4, 0);
   group.add(ridge);
 
   const signCanvas = document.createElement('canvas');
@@ -2367,7 +2487,22 @@ function buildSalon(x, z, side) {
   sign.rotation.y = streetDX > 0 ? -Math.PI / 2 : Math.PI / 2;
   group.add(sign);
 
+  const beacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xff8fc4, emissive: 0xff8fc4, emissiveIntensity: 0.6, transparent: true, opacity: 0.85 })
+  );
+  beacon.position.set(0, postH + 1.9, 0);
+  group.add(beacon);
+
   scene.add(group);
+
+  const zoneR = 4.5;
+  interactionZones.push({
+    minX: x - zoneR, maxX: x + zoneR,
+    minZ: z - zoneR, maxZ: z + zoneR,
+    cx: x, cz: z, counterX: x, counterZ: z,
+    beacon, kind: 'groom', inZone: false,
+  });
 
   buildBarberPole(x + streetDX * (w / 2 + 1.2), z + d / 2 - 0.8);
 }
@@ -4448,6 +4583,7 @@ function createTownsperson(x, z, faceAngle, type) {
     kid:        { shirt: [0xcc5544, 0x44aa66, 0xddaa44][Math.floor(Math.random() * 3)], hatColor: null, hatBig: false, accent: null, accentType: null, trousers: 0x5a4422, scale: 0.95 },
     blacksmith: { shirt: 0x6a3a1a, hatColor: null, hatBig: false, accent: 0x4a3020, accentType: 'apron', trousers: 0x3a2008 },
     banker:     { shirt: 0x1a1a2a, hatColor: 0x1a1a2a, hatBig: false, accent: 0xd0c08a, accentType: 'tie', trousers: 0x1a1a2a },
+    hairdresser: { shirt: 0xdd6699, hatColor: null, hatBig: false, accent: 0xffd9ec, accentType: 'apron', trousers: 0xcc5588, female: true },
   };
   const T = types[type] || types.kid;
   const personScale = T.scale || 1.0;
@@ -4507,6 +4643,26 @@ function createTownsperson(x, z, faceAngle, type) {
     headband.position.y = 1.62;
     headband.rotation.x = Math.PI / 2;
     group.add(headband);
+  }
+
+  if (T.female) {
+    const hairColor = 0x6a3d1f;
+    const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), S(hairColor));
+    hairCap.position.y = 1.605;
+    hairCap.scale.set(1.05, 0.85, 1.05);
+    group.add(hairCap);
+    for (const side of [-1, 1]) {
+      const lock = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.035, 0.42, 8), S(hairColor));
+      lock.position.set(-0.02, 1.4, side * 0.13);
+      group.add(lock);
+    }
+    const bow = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), S(0xffe14d));
+    bow.position.set(0.02, 1.72, 0.12);
+    bow.scale.set(1, 0.6, 1.6);
+    group.add(bow);
+    const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.55, 14), S(T.trousers));
+    skirt.position.y = 0.72;
+    group.add(skirt);
   }
 
   // Accent (star, apron, vest, tie)
@@ -4760,6 +4916,7 @@ function createHorse() {
   // Only horse casts shadow (other models don't, for performance)
   horseGroup.traverse(c => { if (c.isMesh) c.castShadow = true; });
   scene.add(horseGroup);
+  applyGroomLook();
 }
 
 // ========== CHALLENGES ==========
@@ -5133,6 +5290,7 @@ function initInput() {
       // New consumable-action keys
       if (e.code === 'KeyE') attemptJump();
       if (e.code === 'KeyZ') attemptEatHay();
+      if (e.code === GROOM.key) attemptGroom();
       // W is a movement key too — this only fires on fresh press to consume napoj
       if (e.code === 'KeyW') attemptDrinkWater();
       // F: buy fajerwerki when inside its buy zone, else consume from inventory
@@ -5310,6 +5468,10 @@ function computeMobileActions() {
     if (applesCollected > 0) contextual.push({ id: 'sell:apple', emoji: '🍎', glow: true,
       action: () => attemptSellItem('apple') });
   }
+  // Groom button — at the salon, when the kid can afford it.
+  if (z && z.kind === 'groom' && money >= groomPrice()) {
+    contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptGroom });
+  }
   // Buy button goes last (nearest the thumb).
   if (buyBtn) contextual.push(buyBtn);
 
@@ -5380,8 +5542,8 @@ function updateMobileButtons() {
 function getInput() {
   let forward = 0, turn = 0, turnIntent = 0;
 
-  // Freeze controls while eating
-  if (isEatingCarrots) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
+  // Freeze controls while eating or being groomed
+  if (isEatingCarrots || isGrooming) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
 
   // Steering is arrow keys only (+ mobile joystick below). WASD is intentionally
   // NOT bound to movement: W/S/D are action keys (drink napój / buy siano / buy
@@ -6498,7 +6660,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina: Stamina.value, level,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina: Stamina.value, level, groomLevel,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -6583,6 +6745,8 @@ window.startGame = async function () {
       inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
     }
     level = saved.level;
+    groomLevel = saved.groomLevel || 0;
+    applyGroomLook();
     correctAnswers = saved.correctAnswers;
     totalAnswers = saved.totalAnswers;
     runTimer = saved.runTimer || 0;
