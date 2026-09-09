@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 8, label: 'Energia' };
+const GAME_VERSION = { number: 9, label: 'Zmęczenie' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -613,7 +613,9 @@ const SPRINT_DRAIN_PER_SEC = 20;
 const STAMINA_REGEN_PER_SEC = 3;
 const NAPOJ_STAMINA = 30;
 const SIANO_STAMINA = 50;
+const SPRINT_RECOVER = 25; // once exhausted, no sprint until stamina climbs back to this
 let isSprinting = false; // set every frame based on Shift + stamina + forward input
+let staminaExhausted = false;
 
 // Stamina — the horse's sprint fuel. Single owner for every mutation: sprint
 // drain/regen in the loop, siano/napój top-ups, and save/restore. Keeps the
@@ -6213,7 +6215,12 @@ function update() {
   const input = getInput();
 
   // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
-  isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !Stamina.isEmpty();
+  // Hysteresis: hitting empty locks sprinting off until stamina recovers past
+  // SPRINT_RECOVER — otherwise a 1-frame regen at zero would let sprint fire
+  // every other frame and effectively run forever on empty.
+  if (Stamina.isEmpty()) staminaExhausted = true;
+  else if (Stamina.value >= SPRINT_RECOVER) staminaExhausted = false;
+  isSprinting = !!keys['ShiftLeft'] && input.forward > 0.1 && !staminaExhausted;
   if (isSprinting) Stamina.drain(dt); else Stamina.regen(dt);
   if (isSprinting) ensureSprintSparkles();
 
