@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 3, label: 'Kokarda' };
+const GAME_VERSION = { number: 4, label: 'Naprawa koni' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -1493,7 +1493,7 @@ function updateInteractionPrompt(activeZone) {
     } else {
       html = `<div style="font-size:72px;line-height:1">💈</div>`
         + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(GROOM.keyLabel, kbdStyle)}</div>`
-        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Ucześ konika — ${price} <span style="font-size:56px">🪙</span></div>`;
+        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Uczesz konika — ${price} <span style="font-size:56px">🪙</span></div>`;
     }
   }
   setHTMLIfChanged(sellPromptEl, html);
@@ -4934,9 +4934,14 @@ function createHorse() {
     horseGroup.add(model);
     horse = model;
     horseMixer = mixer;
-    // Brighten horse materials
+    // Give the player horse its OWN material instances before tinting. Cloned
+    // GLB models share materials (SkeletonUtils), so mutating them here — or
+    // later in applyGroomLook — would otherwise also recolour the farm horses.
     model.traverse((child) => {
       if (child.isMesh && child.material) {
+        child.material = Array.isArray(child.material)
+          ? child.material.map(m => m.clone())
+          : child.material.clone();
         const mats = Array.isArray(child.material) ? child.material : [child.material];
         mats.forEach(m => {
           if (m.color) m.color.multiplyScalar(1.3);
