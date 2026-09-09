@@ -1476,6 +1476,18 @@ function updateLetterDelivery(dt) {
   }
 }
 
+function nearestLetterRecipient() {
+  let best = null, bestDistanceSq = Infinity;
+  for (const farmer of farmers) {
+    if (farmer.mounted || farmer.role !== 'farmer') continue;
+    const p = farmer.group.position;
+    const dx = horsePos.x - p.x, dz = horsePos.z - p.z;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq < bestDistanceSq) { bestDistanceSq = distanceSq; best = farmer; }
+  }
+  return best;
+}
+
 // Transient celebration popups (sell/buy/delivery/consume) share the same
 // shape: center-top absolute, colored pill, pop-in on show, fade-up on close.
 // Only tone (colors), position, size and duration vary.
@@ -1800,8 +1812,14 @@ function updatePassengerQuests(dt) {
     const dz = horsePos.z - q.destination.z;
     updatePassengerArrivalPrompt(Math.sqrt(dx * dx + dz * dz) < PASSENGER_DELIVERY_RADIUS, q);
   } else {
-    hideDestinationMarker();
     updatePassengerArrivalPrompt(false, null);
+    const letterRecipient = inventory.list > 0 ? nearestLetterRecipient() : null;
+    if (letterRecipient) {
+      showDestinationMarker(letterRecipient.group.position);
+      pulseDestinationMarker(clock.elapsedTime);
+    } else {
+      hideDestinationMarker();
+    }
   }
   let bubble = null, best = Infinity;
   for (const f of farmers) {
