@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 5, label: 'Błoto' };
+const GAME_VERSION = { number: 6, label: 'Tęcza' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -1573,7 +1573,7 @@ function groomPrice() { return GROOM.basePrice * Math.pow(2, groomLevel); }
 
 const MUD = { x: 40, z: 26, r: 7 };
 
-const GROOM_MAX_LEVEL = 2;
+const GROOM_MAX_LEVEL = 3;
 const RAINBOW_COLORS = [0xff3b30, 0xff9500, 0xffd60a, 0x34c759, 0x0a84ff, 0x5e5ce6, 0xbf5af2];
 
 let groomAccessories = null;
@@ -1598,7 +1598,7 @@ function ensureGroomAccessories() {
 function refreshHorseLook() {
   if (!horse) return;
   const shownLevel = isDirty ? 0 : groomLevel;
-  const gloss = Math.min(0.45, 0.14 * shownLevel);
+  const gloss = Math.min(0.32, 0.11 * shownLevel);
   horse.traverse(child => {
     if (!child.isMesh || !child.material) return;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
@@ -1670,7 +1670,7 @@ function buildGroomBow() {
     loop.rotation.z = s * Math.PI / 2;
     bow.add(loop);
   }
-  bow.position.set(0, 2.15, 0.55);
+  bow.position.set(0, 1.98, 0.36);
   return bow;
 }
 
@@ -1683,9 +1683,9 @@ function buildGroomRainbow() {
     crest.position.set(0, 2.35 - t * 0.7, 0.75 - t * 0.55);
     crest.rotation.x = -0.5;
     g.add(crest);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 0.05), strandMat);
-    tail.position.set((i - 3) * 0.055, 1.35, -1.05);
-    tail.rotation.x = 0.4;
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.62, 0.05), strandMat);
+    tail.position.set((i - 3) * 0.045, 1.05, -1.0);
+    tail.rotation.x = 0.55;
     g.add(tail);
   });
   return g;
@@ -1750,7 +1750,6 @@ function showGroomingCutscene(caption, durationMs) {
 function hideGroomingCutscene() {
   if (groomingOverlayEl) groomingOverlayEl.classList.remove('show');
 }
-
 // Transient celebration popups (sell/buy/delivery/consume) share the same
 // shape: center-top absolute, colored pill, pop-in on show, fade-up on close.
 // Only tone (colors), position, size and duration vary.
