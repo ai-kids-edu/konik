@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 4, label: 'Naprawa koni' };
+const GAME_VERSION = { number: 5, label: 'Błoto' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -915,6 +915,9 @@ function initScene() {
   // Farm with animals
   createFarm();
 
+  // Mud wallow out in the field
+  buildMudPuddle(MUD.x, MUD.z);
+
   // Trees (only on farm, not beach)
   for (let i = 0; i < 30; i++) {
     const x = (Math.random() - 0.5) * 140;
@@ -1394,7 +1397,7 @@ function updateInteractionZones(dt) {
       } else if (zone.kind === 'buy') {
         cue = Economy.canBuy(zone.itemKey);
       } else if (zone.kind === 'groom') {
-        cue = groomLevel < GROOM_MAX_LEVEL && money >= groomPrice();
+        cue = isDirty || (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice());
       }
     }
     zone.beacon.material.emissiveIntensity = cue ? (0.6 + pulseT * 1.4) : 0.35;
@@ -1483,7 +1486,11 @@ function updateInteractionPrompt(activeZone) {
     }
   } else if (activeZone.kind === 'groom') {
     const price = groomPrice();
-    if (groomLevel >= GROOM_MAX_LEVEL) {
+    if (isDirty) {
+      html = `<div style="font-size:72px;line-height:1">🧼🐴</div>`
+        + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(GROOM.keyLabel, kbdStyle)}</div>`
+        + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Umyj konika — za darmo</div>`;
+    } else if (groomLevel >= GROOM_MAX_LEVEL) {
       html = `<div style="font-size:72px;line-height:1">✨🐴✨</div>`
         + `<div style="margin-top:12px;font-size:38px;color:#ffd9ec">Konik już piękny!</div>`;
     } else if (money < price) {
@@ -1559,9 +1566,12 @@ function nearestLetterRecipient() {
 
 // ===== SALON GROOMING =====
 let groomLevel = 0;
+let isDirty = false;
 let isGrooming = false;
 const GROOM = { key: 'KeyG', keyLabel: 'G', basePrice: 15, durationMs: 8000 };
 function groomPrice() { return GROOM.basePrice * Math.pow(2, groomLevel); }
+
+const MUD = { x: 40, z: 26, r: 7 };
 
 const GROOM_MAX_LEVEL = 2;
 const RAINBOW_COLORS = [0xff3b30, 0xff9500, 0xffd60a, 0x34c759, 0x0a84ff, 0x5e5ce6, 0xbf5af2];
@@ -1575,28 +1585,78 @@ function ensureGroomAccessories() {
   const rainbow = buildGroomRainbow();
   rainbow.visible = false;
   horseGroup.add(rainbow);
-  groomAccessories = { bow, rainbow };
+  const mud = buildMudSplatter();
+  mud.visible = false;
+  horseGroup.add(mud);
+  groomAccessories = { bow, rainbow, mud };
   return groomAccessories;
 }
 
-// Stage 1: glossy, tinted coat. Stage 2: a bow on the mane. Stage 3: a rainbow
-// mane crest and tail. Each stage keeps the ones below it.
-function applyGroomLook() {
-  if (!horse || groomLevel < 1) return;
-  const gloss = Math.min(0.45, 0.14 * groomLevel);
-  const roughness = Math.max(0.25, 0.9 - 0.16 * groomLevel);
+// The horse's whole appearance in one place. Mud wins: it dulls the coat and
+// hides every makeover. Otherwise stage 1 = glossy tinted coat, 2 = bow on the
+// mane, 3 = rainbow mane + tail, each keeping the ones below it.
+function refreshHorseLook() {
+  if (!horse) return;
+  const shownLevel = isDirty ? 0 : groomLevel;
+  const gloss = Math.min(0.45, 0.14 * shownLevel);
   horse.traverse(child => {
     if (!child.isMesh || !child.material) return;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     mats.forEach(m => {
-      if ('roughness' in m) m.roughness = roughness;
+      if ('roughness' in m) {
+        const base = m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85;
+        m.roughness = isDirty ? 1.0 : Math.max(0.25, base - 0.16 * shownLevel);
+      }
       if (m.emissive) { m.emissive.setHex(0xffd9ec); m.emissiveIntensity = gloss; }
     });
   });
   const acc = ensureGroomAccessories();
   if (acc) {
-    acc.bow.visible = groomLevel >= 2;
-    acc.rainbow.visible = groomLevel >= 3;
+    acc.bow.visible = !isDirty && groomLevel >= 2;
+    acc.rainbow.visible = !isDirty && groomLevel >= 3;
+    acc.mud.visible = isDirty;
+  }
+}
+
+function buildMudSplatter() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x5a3a1c, roughness: 1.0 });
+  const blobs = [
+    [0.0, 1.55, -0.2, 0.34], [0.28, 1.35, 0.15, 0.26], [-0.26, 1.3, 0.1, 0.24],
+    [0.1, 1.12, -0.6, 0.22], [-0.15, 1.7, 0.35, 0.2], [0.05, 1.0, 0.45, 0.2],
+  ];
+  for (const [bx, by, bz, r] of blobs) {
+    const blob = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), mat);
+    blob.position.set(bx, by, bz);
+    blob.scale.set(1, 0.6, 1);
+    g.add(blob);
+  }
+  return g;
+}
+
+// A big wallow puddle out in the field. Ride the horse into it to get muddy;
+// the salon then offers a wash (which also resets any makeover).
+function buildMudPuddle(x, z) {
+  const mudMat = new THREE.MeshStandardMaterial({ color: 0x4a3018, roughness: 0.85, metalness: 0.15 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0x5c4526, roughness: 1.0 });
+  for (const [ox, oz, r, mat] of [
+    [0, 0, MUD.r, mudMat], [-2.5, 1.5, MUD.r * 0.6, mudMat], [2.5, -1.5, MUD.r * 0.55, mudMat],
+    [0, 0, MUD.r + 0.8, rimMat],
+  ]) {
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 28), mat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.set(x + ox, getTerrainHeight(x + ox, z + oz) + (mat === rimMat ? 0.02 : 0.05), z + oz);
+    scene.add(disc);
+  }
+}
+
+function updateMud() {
+  if (isDirty || isGrooming) return;
+  const dx = horsePos.x - MUD.x, dz = horsePos.z - MUD.z;
+  if (dx * dx + dz * dz < (MUD.r - 1) * (MUD.r - 1)) {
+    isDirty = true;
+    refreshHorseLook();
+    showTransientPopup('mud', { tone: 'sell', top: 16, fontSize: 46, duration: 1400 }, 'Ubłocony! 🟤');
   }
 }
 
@@ -1638,19 +1698,28 @@ function activeGroomZone() {
   return zone;
 }
 
-function attemptGroom() {
+function attemptSalonAction() {
   if (isGrooming || !activeGroomZone()) return;
+  // A muddy horse gets washed (free) — which resets it to the plain starting look.
+  if (isDirty) {
+    startSalon('🧼 Mycie 🧼', () => { isDirty = false; groomLevel = 0; });
+    return;
+  }
   if (groomLevel >= GROOM_MAX_LEVEL) return;
   const price = groomPrice();
   if (money < price) return;
   money -= price;
   updateCarrotHUD();
+  startSalon('✨ Upiększanie ✨', () => { groomLevel += 1; });
+}
+
+function startSalon(caption, finish) {
   isGrooming = true;
-  showGroomingCutscene('✨ Upiększanie ✨', GROOM.durationMs);
+  showGroomingCutscene(caption, GROOM.durationMs);
   setTimeout(() => {
     isGrooming = false;
-    groomLevel += 1;
-    applyGroomLook();
+    finish();
+    refreshHorseLook();
     spawnConfetti({ x: horsePos.x, y: horsePos.y + 2, z: horsePos.z });
     hideGroomingCutscene();
   }, GROOM.durationMs);
@@ -4945,6 +5014,7 @@ function createHorse() {
         const mats = Array.isArray(child.material) ? child.material : [child.material];
         mats.forEach(m => {
           if (m.color) m.color.multiplyScalar(1.3);
+          if ('roughness' in m) m.userData.baseRoughness = m.roughness;
         });
       }
     });
@@ -4979,7 +5049,7 @@ function createHorse() {
   // Only horse casts shadow (other models don't, for performance)
   horseGroup.traverse(c => { if (c.isMesh) c.castShadow = true; });
   scene.add(horseGroup);
-  applyGroomLook();
+  refreshHorseLook();
 }
 
 // ========== CHALLENGES ==========
@@ -5353,7 +5423,7 @@ function initInput() {
       // New consumable-action keys
       if (e.code === 'KeyE') attemptJump();
       if (e.code === 'KeyZ') attemptEatHay();
-      if (e.code === GROOM.key) attemptGroom();
+      if (e.code === GROOM.key) attemptSalonAction();
       // W is a movement key too — this only fires on fresh press to consume napoj
       if (e.code === 'KeyW') attemptDrinkWater();
       // F: buy fajerwerki when inside its buy zone, else consume from inventory
@@ -5532,8 +5602,12 @@ function computeMobileActions() {
       action: () => attemptSellItem('apple') });
   }
   // Groom button — at the salon, when the kid can afford it.
-  if (z && z.kind === 'groom' && groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
-    contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptGroom });
+  if (z && z.kind === 'groom') {
+    if (isDirty) {
+      contextual.push({ id: 'wash', emoji: '🧼', glow: true, action: attemptSalonAction });
+    } else if (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
+      contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptSalonAction });
+    }
   }
   // Buy button goes last (nearest the thumb).
   if (buyBtn) contextual.push(buyBtn);
@@ -6255,6 +6329,7 @@ function update() {
   updateInteractionZones(dt);
   updateMobileButtons();
   updateLetterDelivery(dt);
+  updateMud();
   updatePassengerQuests(dt);
   updateStaminaBar();
   updateCrab(dt);
@@ -6723,7 +6798,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina: Stamina.value, level, groomLevel,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, stamina: Stamina.value, level, groomLevel, isDirty,
     correctAnswers, totalAnswers, runTimer, walkTime,
     challenges: savedChallenges,
     gameStarted: true,
@@ -6809,7 +6884,8 @@ window.startGame = async function () {
     }
     level = saved.level;
     groomLevel = saved.groomLevel || 0;
-    applyGroomLook();
+    isDirty = !!saved.isDirty;
+    refreshHorseLook();
     correctAnswers = saved.correctAnswers;
     totalAnswers = saved.totalAnswers;
     runTimer = saved.runTimer || 0;
