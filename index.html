@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 7, label: 'Błoto na wierzchu' };
+const GAME_VERSION = { number: 8, label: 'Energia' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -2154,7 +2154,7 @@ function attemptEatHay() {
   inventory.siano -= 1;
   Stamina.add(SIANO_STAMINA);
   updateCarrotHUD();
-  showConsumePopup(`+${SIANO_STAMINA} <span style="font-size:52px">⚡</span> staminy`);
+  showConsumePopup(`+${SIANO_STAMINA} <span style="font-size:52px">⚡</span> energii`);
   playHorseAnimation('eating', 1200);
   isEatingCarrots = true;
   setTimeout(() => { isEatingCarrots = false; }, 1200);
@@ -2166,7 +2166,7 @@ function attemptDrinkWater() {
   inventory.napoj -= 1;
   Stamina.add(NAPOJ_STAMINA);
   updateCarrotHUD();
-  showConsumePopup(`+${NAPOJ_STAMINA} <span style="font-size:52px">⚡</span> staminy`);
+  showConsumePopup(`+${NAPOJ_STAMINA} <span style="font-size:52px">⚡</span> energii`);
 }
 
 function consumeFajerwerki() {
