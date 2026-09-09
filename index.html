@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 9, label: 'Zmęczenie' };
+const GAME_VERSION = { number: 10, label: 'Konfetti' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -3901,7 +3901,7 @@ function giveApplesFromCheetah() {
   updateCarrotHUD();
 
   // Confetti celebration
-  if (typeof createConfetti === 'function') createConfetti(horsePos.x, horsePos.y + 2, horsePos.z);
+  spawnConfetti({ x: horsePos.x, y: horsePos.y + 2, z: horsePos.z });
 
   // Remove apples after a few seconds
   setTimeout(() => { scene.remove(appleGrp); }, 4000);
@@ -4133,7 +4133,7 @@ function giveMeatToTiger() {
         scene.remove(meatGroup);
         // Tiger is happy! Jump and run around!
         tigerData.happyTimer = 5;
-        if (typeof createConfetti === 'function') createConfetti(g.position.x, g.position.y + 2, g.position.z);
+        spawnConfetti({ x: g.position.x, y: g.position.y + 2, z: g.position.z });
         return;
       }
       const s = 1 - t;
