@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 29, label: 'Modul kamery' };
+const GAME_VERSION = { number: 30, label: 'Kolory konia' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1613,11 +1613,19 @@ let horseHairMats = [];
 const hairOrigMaps = new Map();
 let coatColor = 0xe9e2d3; // natural warm off-white (not snow-white); salon can recolour
 let coatOrigImg = null;   // the model's own coat texture — reused for real fur shading
-let coatWhiteImg = null;  // optional hand-made white coat skin (models/horse_coat_white.webp)
+// Purpose-made coat skins (same UV as the model). The salon can switch between
+// them; each is models/horse_coat_<name>.webp.
+const COAT_SKINS = ['white', 'siwy', 'gniady', 'bulany'];
+let coatSkin = 'white';    // current colour; persisted in the save
+let coatWhiteImg = null;   // the loaded skin image; drawn in paintCoat
 function loadCoatSkin() {
-  new THREE.TextureLoader().load('models/horse_coat_white.webp',
+  new THREE.TextureLoader().load(`models/horse_coat_${coatSkin}.webp`,
     (t) => { coatWhiteImg = t.image; refreshHorseLook(); },
-    undefined, () => {}); // absent → fall back to whitening the model's own texture
+    undefined, () => { coatWhiteImg = null; refreshHorseLook(); }); // absent → fall back to whitening the model's own texture
+}
+function cycleCoatColor() {
+  coatSkin = COAT_SKINS[(COAT_SKINS.indexOf(coatSkin) + 1) % COAT_SKINS.length];
+  loadCoatSkin();
 }
 let _coatCanvas = null, _coatTex = null, _hairCanvas = null, _hairTex = null;
 
@@ -5488,6 +5496,11 @@ function initInput() {
       if (e.code === 'KeyE') attemptJump();
       if (e.code === 'KeyZ') attemptEatHay();
       if (e.code === GROOM.key) attemptSalonAction();
+      // At the salon, C recolours the coat (cycles through the skins).
+      if (e.code === 'KeyC' && activeGroomZone() && !isGrooming) {
+        cycleCoatColor();
+        showConsumePopup('🎨 Nowy kolor!');
+      }
       // W is a movement key too — this only fires on fresh press to consume napoj
       if (e.code === 'KeyW') attemptDrinkWater();
       // F: buy fajerwerki when inside its buy zone, else consume from inventory
@@ -5672,6 +5685,8 @@ function computeMobileActions() {
     } else if (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
       contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptSalonAction });
     }
+    // Recolour the coat — available at the salon whenever not muddy.
+    if (!isDirty) contextual.push({ id: 'color', emoji: '🎨', action: () => { cycleCoatColor(); showConsumePopup('🎨 Nowy kolor!'); } });
   }
   // Buy button goes last (nearest the thumb).
   if (buyBtn) contextual.push(buyBtn);
@@ -6912,7 +6927,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, level, groomLevel, isDirty,
+    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, level, groomLevel, isDirty, coatSkin,
     correctAnswers, totalAnswers, runTimer,
     challenges: savedChallenges,
     gameStarted: true,
@@ -6978,6 +6993,7 @@ window.startGame = async function () {
     level = saved.level;
     groomLevel = saved.groomLevel || 0;
     isDirty = !!saved.isDirty;
+    if (saved.coatSkin && COAT_SKINS.includes(saved.coatSkin)) { coatSkin = saved.coatSkin; loadCoatSkin(); }
     refreshHorseLook();
     correctAnswers = saved.correctAnswers;
     totalAnswers = saved.totalAnswers;
