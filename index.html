@@ -379,10 +379,23 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 16, label: 'Marchewki' };
+const GAME_VERSION = { number: 17, label: 'Sloty testowe' };
+
+// Dev/test switches via query string. `?save_name=foo` isolates progress in its
+// own slot (default = the shared 'horseGameState' the family plays, untouched).
+// `?cash=1000` tops up coins for testing. Any switch shows a marker in the badge.
+const _params = new URLSearchParams(location.search);
+const SAVE_NAME = (_params.get('save_name') || '').replace(/[^a-z0-9_-]/gi, '');
+const SAVE_KEY = SAVE_NAME ? `horseGameState_${SAVE_NAME}` : 'horseGameState';
+const CHEAT_CASH = parseInt(_params.get('cash') || '0', 10) || 0;
+
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
-  if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
+  if (!badge) return;
+  let text = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
+  if (SAVE_NAME) text += ` · 🧪${SAVE_NAME}`;
+  if (CHEAT_CASH) text += ` · +${CHEAT_CASH}🪙`;
+  badge.textContent = text;
 }
 renderVersionBadge();
 
@@ -6835,19 +6848,19 @@ function saveState() {
     challenges: savedChallenges,
     gameStarted: true,
   };
-  localStorage.setItem('horseGameState', JSON.stringify(state));
+  localStorage.setItem(SAVE_KEY, JSON.stringify(state));
 }
 
 function loadState() {
   try {
-    let raw = localStorage.getItem('horseGameState');
+    let raw = localStorage.getItem(SAVE_KEY);
     if (!raw) {
       // Migrate from previous sessionStorage-based build so kids don't
       // lose progress on the first reload after this switch.
-      raw = sessionStorage.getItem('horseGameState');
+      raw = sessionStorage.getItem(SAVE_KEY);
       if (raw) {
-        localStorage.setItem('horseGameState', raw);
-        sessionStorage.removeItem('horseGameState');
+        localStorage.setItem(SAVE_KEY, raw);
+        sessionStorage.removeItem(SAVE_KEY);
       }
     }
     if (!raw) return null;
@@ -6857,7 +6870,7 @@ function loadState() {
 
 // ========== START ==========
 function resetGame() {
-  localStorage.removeItem('horseGameState');
+  localStorage.removeItem(SAVE_KEY);
   location.reload();
 }
 
@@ -6930,6 +6943,9 @@ window.startGame = async function () {
     // Spawn initial challenges
     for (let i = 0; i < 3; i++) createChallenge();
   }
+
+  // Testing top-up via ?cash=N (applies whether or not a save was loaded).
+  if (CHEAT_CASH) { money += CHEAT_CASH; updateCarrotHUD(); }
 
   // Assign initial passenger delivery quests to townspeople
   if (farmers.length > 0) assignNewPassengerQuest();
