@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 40, label: 'Mobile intro fix 🏇' };
+const GAME_VERSION = { number: 41, label: 'Płynniejsza minimapa' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -6436,23 +6436,14 @@ function initMinimap() {
   minimapCtx = minimapCanvas.getContext('2d');
 }
 
-function drawMinimap() {
-  const ctx = minimapCtx;
-  if (!ctx) return;
-  const W = 160, H = 160;
-  const R = W / 2;
-  const MAP_RANGE = 250;
-  const CENTER_Z = -150; // shift so road+city visible in lower half
-
-  function toMap(wx, wz) {
-    return {
-      x: (wx / MAP_RANGE * 0.5 + 0.5) * W,
-      y: ((wz - CENTER_Z) / MAP_RANGE * 0.5 + 0.5) * H,
-    };
-  }
-
-  ctx.clearRect(0, 0, W, H);
-
+// The minimap's whole background (terrain zones, road, farm, beach/water, trees,
+// static markers, border) never changes during play, yet the per-pixel beach/water
+// loop and all the gradients were being re-rasterised every few frames — a real
+// hitch on Windows/Chrome. Bake it once to an offscreen canvas; each frame just
+// blits it and draws the moving markers on top.
+let minimapBg = null;
+function buildMinimapStatic(ctx, W, H, R, toMap) {
+  const MAP_RANGE = 250, CENTER_Z = -150;
   // Clip to circle
   ctx.save();
   ctx.beginPath();
@@ -6532,6 +6523,33 @@ function drawMinimap() {
     ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  ctx.restore(); // end static clip
+}
+
+function drawMinimap() {
+  const ctx = minimapCtx;
+  if (!ctx) return;
+  const W = 160, H = 160, R = W / 2, MAP_RANGE = 250, CENTER_Z = -150;
+  function toMap(wx, wz) {
+    return {
+      x: (wx / MAP_RANGE * 0.5 + 0.5) * W,
+      y: ((wz - CENTER_Z) / MAP_RANGE * 0.5 + 0.5) * H,
+    };
+  }
+  if (!minimapBg) {
+    minimapBg = document.createElement('canvas');
+    minimapBg.width = W; minimapBg.height = H;
+    buildMinimapStatic(minimapBg.getContext('2d'), W, H, R, toMap);
+  }
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(minimapBg, 0, 0); // cached terrain/zones/trees/water
+
+  // Moving markers only — clipped to the circle.
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(R, R, R - 2, 0, Math.PI * 2);
+  ctx.clip();
 
   // Challenges (glowing golden stars)
   for (const ch of challenges) {
