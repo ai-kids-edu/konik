@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 44, label: 'Wydajność: woda + światła' };
+const GAME_VERSION = { number: 45, label: 'Wydajność: daleki LOD' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -558,6 +558,7 @@ function cloneModel(key, scale = 1) {
 
 // Mixers for animated models
 const animationMixers = [];
+const _tmpMixerPos = new THREE.Vector3(); // reused in the mixer distance-gate (no per-frame alloc)
 
 function createAnimatedClone(key, scale = 1) {
   const original = loadedModels[key];
@@ -7005,14 +7006,32 @@ function update() {
   }
 
   // Update all animation mixers (farm animals, birds, etc.)
+  // Skinned animation is expensive (bone matrices + GPU skinning). Animals/birds
+  // far from the horse barely register, so update their mixers at a quarter rate
+  // (with catch-up dt so the anim stays continuous). Near ones stay smooth.
+  window.__mixerFrame = (window.__mixerFrame || 0) + 1;
+  const farQuarter = window.__mixerFrame % 4 === 0;
   for (const mixer of animationMixers) {
+    const root = mixer.getRoot();
+    if (root && root.parent) {
+      root.getWorldPosition(_tmpMixerPos);
+      const ddx = _tmpMixerPos.x - horsePos.x, ddz = _tmpMixerPos.z - horsePos.z;
+      if (ddx * ddx + ddz * ddz > 60 * 60) {      // >60 m away
+        if (farQuarter) mixer.update(dt * 4);
+        continue;
+      }
+    }
     mixer.update(dt);
   }
 
   // Animate water, clouds, and birds
-  // Animate water every 4th frame (CPU wave pass + full vertex-buffer re-upload)
+  // Animate water every 4th frame (CPU wave pass + full vertex-buffer re-upload),
+  // and only when the shore is close enough to actually see the ripples — far
+  // inland the whole wave pass is wasted work.
   window.__waterFrame = (window.__waterFrame || 0) + 1;
-  if (window.__waterFrame % 4 === 0) animateWater(clock.elapsedTime);
+  if (window.__waterFrame % 4 === 0 && (waterStartZ(horsePos.x) - horsePos.z) < 110) {
+    animateWater(clock.elapsedTime);
+  }
   animateClouds(dt);
   animateBirds(dt);
   animateTumbleweeds(dt);
