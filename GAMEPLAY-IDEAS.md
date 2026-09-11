@@ -154,3 +154,84 @@ Później: powtarzane dodawanie → mnożenie, połowy.
 
 > Zależność techniczna: żeby dodawać typy wyzwań czysto, warto zrobić z wyzwania **dane/typ**
 > (`challenge.type`) zamiast jednego wariantu — patrz `DESIGN-DIRECTION.md` (podejście data-driven).
+
+---
+
+# Holistyczny redesign: „matematyka JEST mechaniką" (nie quiz w grze)
+
+Research najlepszych gier (ST Math — całkowicie **bez słów**, DragonBox, Motion Math, Numberblocks)
+dał jeden wniosek: istnieją dwie filozofie.
+- **„Matematyka JEST mechaniką"** — czasownik gry *jest* matematyką; świat reaguje na ilość; bez
+  tekstu, dotykowo, natychmiastowa wizualna konsekwencja. To wygrywa u dzieci, które nie czytają.
+- **„Matematyka oprawiona grą"** (Prodigy) — zwykła pętla z doklejonym quizem. Krytykowane: słabo uczy,
+  nagroda zewnętrzna.
+
+Nasze „podjedź do bramki, policz kropki, wybierz wiaderko" to ta **druga**. Redesign = pchnąć wszystko
+w stronę pierwszej: niech czasowniki świata konia (**karmienie, ładowanie, handel, zaganianie,
+czesanie, skakanie**) *same będą* składaniem/rozkładaniem/porównywaniem/grupowaniem liczb. **Ekonomia
+to prezent** — pieniądze to najbardziej konkretny, najbardziej motywujący kontekst matematyki.
+
+## Zasady (przyjęte z researchu)
+- **Ilość ma ciało** — rozmiar/wysokość/liczba sztuk = liczba (bele siana, stosy monet, skrzynie).
+  Nigdy goła cyfra dla tego wieku.
+- **Konsekwencja, nie brzęczyk** — źle = łagodny widoczny skutek (krowa dalej głodna, koń nie
+  dosięga). Masz to w przewracającym się wiaderku — rozszerz wszędzie.
+- **Łącz = dodawaj, rozdziel = odejmuj** — scalaj/przeciągaj stosy.
+- **Ten-frame** (10 slotów) jako powtarzalny pojemnik — puste sloty uczą dopełnienia same, samo się
+  koryguje. Uczy „do dziesiątki" (najważniejsza umiejętność klasy 1).
+- **Otwarte cele** („zrób 7 dowolnie") zamiast jednej poprawnej odpowiedzi — bogatsze, powtarzalne.
+- **Nauka przez majsterkowanie**, bez instrukcji — pierwsze spotkanie da się zrozumieć bez tekstu.
+  (Uwaga: nasze córki w klasie 1 **już czytają** — więc tekst/historyjki są dla nich OK; „bez słów" to
+  bonus dla młodszych/kolegów i powtarzalności, nie twardy wymóg. Można używać krótkich zadań z treścią.)
+- **Progresja = nowy CZASOWNIK/miejsce, nie większe liczby.** Dwie osie trudności osobno (zakres liczb
+  vs nowe typy mechanik). Nuda bierze się z kręcenia tylko zakresem.
+
+## Trzy nowe filary (pomysły właściciela, wpięte w powyższe)
+
+**1. Dopełnianie 4 + ? = 9 — PRIORYTET (jedna z córek potrzebuje pewności).**
+To *number bonds / pary do 10* — fundament płynności. Formy:
+- Szybkie wiaderko: „4 kropki + [luka] = 9 kropek" → wybierz brakującą liczbę. Ten-frame (4 wypełnione
+  — ile do 9?).
+- **Combine-to-feed** (najwyższy ROI z researchu): scalaj stosy jabłek, żeby nakarmić zwierzę
+  **dokładnie N**; taca ten-frame; konsekwencja = najadło się / dalej głodne (reużywa animacji jedzenia).
+
+**2. Transport (przywieź / zabierz) — daje POWÓD, żeby liczyć (konkret przed abstrakcją).**
+- Zawsze **konkretny, widoczny przedmiot** (jabłka/siano/marchew) jako ciała + ten-frame; stan farmera
+  widoczny (4 jabłka w ramce na 9 → puste sloty pokazują cel). Nigdy „5 czegoś".
+- **GUARDRAIL anty-zgadywanie (kluczowy):** rozdziel **ZAŁADUNEK** (u źródła wybierasz konkretną liczbę
+  — to jest akt matematyczny) od **DOSTAWY** (wszystko-albo-nic, jeden strzał). **Nie można dosypywać
+  po drodze aż zagra** — inaczej to trial-and-error, nie liczenie. Zły załadunek → farmer pokazuje
+  **lukę na ten-frame** (pudło = następny rachunek: „brakuje 2") i wracasz po ponowny załadunek (koszt),
+  więc policzyć jest taniej niż zgadywać.
+- Dla **czystego dopełniania** i tak preferuj formy **jednego wyboru** (combine-to-feed / wiaderko) —
+  z natury brute-proof. Transport najlepszy na „**załaduj dokładnie X**", „**zabierz X**", i
+  **pojemność → kursy**.
+- **Pojemność/wóz:** start = **kosz/sakwa na koniu ~10 (= jeden ten-frame)**, dość na klasę 1. Później
+  **wóz ciągnięty** o pojemności **< cel** → wiele kursów = grupowanie/dzielenie (progresja).
+
+**3. Tor przeszkód konny (jak na zawodach) — embodied, motyw konia.**
+- Dedykowana arena; reużywa **skoku (E)**. Przeszkody jako **oś liczbowa** („dojedź do 9"), albo
+  przeskakuj **po kolei** (porządkowe), albo **co 2** (liczenie skokami). Nagroda: **kokarda/wstążka**
+  (spina z ekonomią/salonem). Strącony drąg = łagodnie, jedziesz dalej (bez kary).
+
+**Zszycie:** *dopełnianie do N* to rdzeń przewijający się przez wszystkie trzy — wiaderko → dostawa
+(„dowieź do 9") → tor („dojedź do 9"). Jeden koncept, trzy smaki = pewność + różnorodność.
+
+## Ekonomia jako główny silnik pieniędzy (mamy ją już!)
+Sklep: **liczenie monet + wydawanie reszty**; **10 monet scala się widocznie w 1 złotą** (system
+dziesiątkowy na oczach). To zamienia zbudowaną ekonomię w główny silnik nauki o pieniądzach i dziesiątkach.
+
+## Inne czasowniki do odblokowania (progresja, NIE większe liczby)
+Zaganianie/sortowanie do zagród (grupowanie, parzyste/nieparzyste, dzielenie po równo) · salon:
+**symetria i wzory** (zero czytania, duże „wow") · **waga/równowaga** (równość, pre-algebra) · budowa
+mostów z bel (długość/liczba) · gotowanie (ułamki, połowy) · zegar/terminy (czas) · mapa-kierunki.
+
+## Kolejność budowy (fun × nauka, min. czytania, max reużycia istniejących systemów)
+1. **Dopełnianie / combine-to-feed** — upgrade bramki + karmienie; number bonds; **potrzebne dziś**.
+2. **Sklep: monety + reszta** (10→1 złota) — reużywa ekonomii; pieniądze + dziesiątki.
+3. **Tace ten-frame** — powtarzalny, samokorygujący pojemnik.
+4. **Droga-oś-liczbowa + tor przeszkód** — ruch/skok = odpowiedź (embodied).
+5. **Zaganianie do zagród** — nowy, intrinsically-fun czasownik.
+6. **Salon: symetria/wzory** — nowy typ, poza arytmetyką.
+
+**Enabler techniczny:** zrobić z wyzwania **typ/dane** (`challenge.type`) — patrz `DESIGN-DIRECTION.md` P7.
