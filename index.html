@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 49, label: 'Tor owal + farma zamknięta 🏇' };
+const GAME_VERSION = { number: 50, label: 'Półka trofeów 🏵️' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2766,6 +2766,9 @@ function buildHippodrome() {
   // Judge NPC near the south (finish) end, cheering the win.
   createTownsperson(H.laneX - 8, zSouth + 8, 0, 'sheriff');
 
+  // Trophy board by the entrance — fills with rosettes as the kid wins clean laps.
+  buildTrophyShelf(H.laneX + 11, zNorth + 1.5);
+
   // Running HUD (hidden until the kid arms the course by crossing the start flag).
   const hud = document.createElement('div');
   hud.id = 'hippo-hud';
@@ -2782,6 +2785,67 @@ function buildHippodrome() {
   // Debug handle (only with ?debug) for scripted verification of the arena logic.
   if (new URLSearchParams(location.search).has('debug')) {
     window.__hippo = { HIPPO, newRound: hippoNewRound, win: hippoWin, barnColliders };
+  }
+}
+
+// A little 3D rosette (disc + centre + two ribbon tails).
+function _makeRosette() {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(0.17, 16), new THREE.MeshBasicMaterial({ color: 0xff5fa2, side: THREE.DoubleSide }));
+  g.add(disc);
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(0.08, 16), new THREE.MeshBasicMaterial({ color: 0xffe14d, side: THREE.DoubleSide }));
+  inner.position.z = 0.01; g.add(inner);
+  for (const s of [-1, 1]) {
+    const rib = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.24), new THREE.MeshBasicMaterial({ color: 0xff5fa2, side: THREE.DoubleSide }));
+    rib.position.set(s * 0.07, -0.22, 0); rib.rotation.z = s * 0.22; g.add(rib);
+  }
+  return g;
+}
+
+// Trophy board — posts + a wooden board with a header, facing north (toward the
+// kid arriving at the arena). Rosettes are added onto it by updateTrophyShelf().
+function buildTrophyShelf(x, z) {
+  const H = HIPPO;
+  const group = new THREE.Group();
+  group.position.set(x, getTerrainHeight(x, z), z);
+  for (const px of [-2.1, 2.1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.4, 8), _mat(0x8a5a2a, 0.85));
+    post.position.set(px, 1.7, 0); group.add(post);
+  }
+  const board = new THREE.Mesh(new THREE.BoxGeometry(4.6, 2.4, 0.12), _mat(0x6a4020, 0.9));
+  board.position.set(0, 2.7, 0); group.add(board);
+  const hdr = document.createElement('canvas');
+  hdr.width = 256; hdr.height = 56;
+  const c = hdr.getContext('2d');
+  c.fillStyle = '#3a2410'; c.fillRect(0, 0, 256, 56);
+  c.fillStyle = '#ffd54a'; c.font = 'bold 34px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('🏵️ TROFEA 🏵️', 128, 30);
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 0.9),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(hdr), transparent: true }));
+  label.position.set(0, 3.55, 0.08); group.add(label);
+  // Container the rosettes are parented to (just in front of the board face).
+  const shelf = new THREE.Group();
+  shelf.position.set(0, 2.7, 0.09);
+  group.add(shelf);
+  scene.add(group);
+  H.trophyShelf = shelf;
+  H.trophyRosettes = [];
+  updateTrophyShelf();
+}
+
+// Rebuild the rosette grid on the trophy board to match the current count.
+function updateTrophyShelf() {
+  const H = HIPPO;
+  if (!H.trophyShelf) return;
+  for (const r of H.trophyRosettes) H.trophyShelf.remove(r);
+  H.trophyRosettes = [];
+  const MAX = 18, cols = 6, cellW = 0.62, cellH = 0.62, x0 = -(cols - 1) / 2 * cellW, y0 = 0.62;
+  const n = Math.min(rosettes, MAX);
+  for (let i = 0; i < n; i++) {
+    const r = _makeRosette();
+    r.position.set(x0 + (i % cols) * cellW, y0 - Math.floor(i / cols) * cellH, 0.02);
+    H.trophyShelf.add(r);
+    H.trophyRosettes.push(r);
   }
 }
 
@@ -2852,6 +2916,7 @@ function hippoWin() {
   money += reward;
   rosettes += 1;
   updateCarrotHUD();
+  updateTrophyShelf();
   spawnConfetti(horsePos);
   spawnCoinBurst(horsePos.x, horsePos.z, 16);
   showTransientPopup('hippo-win', { top: 30, fontSize: 46, pad: '22px 46px', radius: 26, duration: 2400, popScale: 1.15, transition: 0.3 },
@@ -7585,6 +7650,7 @@ window.startGame = async function () {
     applesCollected = saved.applesCollected || 0;
     money = saved.money || 0;
     rosettes = saved.rosettes || 0;
+    updateTrophyShelf(); // reflect saved rosettes on the arena trophy board
     Stamina.set(MAX_STAMINA); // always start a session full — never restore a drained bar
     if (saved.inventory) {
       inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
