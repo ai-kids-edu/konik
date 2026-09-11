@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 32, label: 'Maść tylko na starcie' };
+const GAME_VERSION = { number: 33, label: 'Lśniąca sierść' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1636,6 +1636,12 @@ const COAT_SKINS = [
   { key: 'bulany', name: 'Bułany', chip: '#c9a86a' },
 ];
 let coatSkin = 'white';    // current colour; persisted in the save
+let coatGroomedImg = null; // freshly-groomed "beautiful" skin, shown from groom stage 1 on
+function loadGroomedSkin() {
+  new THREE.TextureLoader().load('models/horse_coat_groomed.webp',
+    (t) => { coatGroomedImg = t.image; refreshHorseLook(); },
+    undefined, () => { coatGroomedImg = null; }); // absent → keep the plain coat
+}
 function loadCoatSkin() {
   coatWhiteImg = null;
   new THREE.TextureLoader().load(`models/horse_coat_${coatSkin}.webp`,
@@ -1682,9 +1688,11 @@ function paintCoat() {
   const ctx = _coatCanvas.getContext('2d');
   ctx.globalCompositeOperation = 'source-over';
   const hex = '#' + coatColor.toString(16).padStart(6, '0');
-  if (coatWhiteImg) {
-    // Purpose-made white coat skin (same UV) — already finished, draw as-is.
-    ctx.drawImage(coatWhiteImg, 0, 0, S, S);
+  // Once groomed, wear the "beautiful" spa skin; otherwise the ordinary coat skin.
+  const skinImg = (groomLevel >= 1 && coatGroomedImg) ? coatGroomedImg : coatWhiteImg;
+  if (skinImg) {
+    // Purpose-made coat skin (same UV) — already finished, draw as-is.
+    ctx.drawImage(skinImg, 0, 0, S, S);
   } else if (coatOrigImg) {
     // Fallback: keep the model's own coat, then wash toward the coat colour so
     // the brown pinto patches fade to white uniformly — no harsh blotches.
@@ -5160,6 +5168,7 @@ function createHorse() {
   scene.add(horseGroup);
   refreshHorseLook();
   loadCoatSkin(); // async: swaps in the purpose-made white skin if present
+  loadGroomedSkin(); // async: the freshly-groomed skin, shown from groom stage 1
 }
 
 // ========== CHALLENGES ==========
