@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 18, label: 'Sloty testowe' };
+const GAME_VERSION = { number: 19, label: 'Lżejszy koń' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -455,8 +455,20 @@ const MODEL_MANIFEST = {
 
 async function loadAllModels(onProgress) {
   const entries = Object.entries(MODEL_MANIFEST);
-  let loaded = 0;
-  const total = entries.length;
+  // Byte-weighted progress: all loads start at once, so Content-Length arrives
+  // for every file almost immediately and the bar tracks real bytes downloaded.
+  // Without this the ~42 tiny models jump the bar to ~98% and it then sits there
+  // while the one big 20 MB hero horse finishes — looking frozen.
+  const bytesLoaded = {}, bytesTotal = {};
+  const NOMINAL = 300000; // fallback size for a file that finishes before a progress event
+
+  function report() {
+    let loaded = 0, all = 0;
+    for (const [key] of entries) {
+      if (bytesTotal[key]) { loaded += bytesLoaded[key] || 0; all += bytesTotal[key]; }
+    }
+    if (onProgress) onProgress(all > 0 ? loaded / all : 0);
+  }
 
   const promises = entries.map(([key, path]) => {
     return new Promise((resolve) => {
@@ -472,19 +484,24 @@ async function loadAllModels(onProgress) {
             child.receiveShadow = true;
           }
         });
-        loaded++;
-        if (onProgress) onProgress(loaded, total);
+        if (!bytesTotal[key]) bytesTotal[key] = NOMINAL;
+        bytesLoaded[key] = bytesTotal[key];
+        report();
         resolve();
-      }, undefined, (err) => {
+      }, (xhr) => {
+        if (xhr && xhr.lengthComputable) { bytesTotal[key] = xhr.total; bytesLoaded[key] = xhr.loaded; report(); }
+      }, (err) => {
         console.warn(`Failed to load ${key}: ${path}`, err);
-        loaded++;
-        if (onProgress) onProgress(loaded, total);
+        if (!bytesTotal[key]) bytesTotal[key] = NOMINAL;
+        bytesLoaded[key] = bytesTotal[key];
+        report();
         resolve(); // don't block on missing models
       });
     });
   });
 
   await Promise.all(promises);
+  if (onProgress) onProgress(1);
 }
 
 function cloneModel(key, scale = 1) {
@@ -1596,7 +1613,7 @@ let groomAccessories = null;
 let horseCoatMats = [];
 let horseHairMats = [];
 const hairOrigMaps = new Map();
-let coatColor = 0xffffff; // default white; the salon can recolour later
+let coatColor = 0xe9e2d3; // natural warm off-white (not snow-white); salon can recolour
 let _coatCanvas = null, _coatTex = null, _hairCanvas = null, _hairTex = null;
 
 function ensureGroomAccessories() {
@@ -1617,6 +1634,21 @@ function paintCoat() {
   const ctx = _coatCanvas.getContext('2d');
   ctx.fillStyle = '#' + coatColor.toString(16).padStart(6, '0');
   ctx.fillRect(0, 0, 256, 256);
+  // Subtle natural variation so the coat isn't a dead flat fill: soft dapples
+  // plus fine speckle, a touch lighter and darker than the base.
+  for (let i = 0; i < 36; i++) {
+    const x = Math.random() * 256, y = Math.random() * 256, r = 16 + Math.random() * 40;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const shade = Math.random() < 0.5 ? '160,152,138' : '255,253,247';
+    g.addColorStop(0, `rgba(${shade},${(0.05 + Math.random() * 0.06).toFixed(2)})`);
+    g.addColorStop(1, `rgba(${shade},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  for (let i = 0; i < 500; i++) {
+    ctx.fillStyle = `rgba(150,142,128,${(0.03 + Math.random() * 0.05).toFixed(2)})`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 1);
+  }
   if (isDirty) {
     for (let i = 0; i < 80; i++) {
       const x = Math.random() * 256, y = Math.random() * 256, r = 4 + Math.random() * 16;
@@ -6881,8 +6913,8 @@ window.startGame = async function () {
   btn.disabled = true;
 
   // Load all GLB models first
-  await loadAllModels((loaded, total) => {
-    const pct = Math.round((loaded / total) * 100);
+  await loadAllModels((fraction) => {
+    const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
     btn.textContent = `Loading... ${pct}%`;
   });
 
