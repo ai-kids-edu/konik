@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 55, label: 'Tor ósemka: start-meta 🏁' };
+const GAME_VERSION = { number: 56, label: 'Fix: krótszy poślizg + cień na wierzchu' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -5741,7 +5741,7 @@ function buildHorseBlob() {
     new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.4, depthWrite: false })
   );
   mesh.rotation.x = -Math.PI / 2;
-  mesh.renderOrder = 1;
+  mesh.renderOrder = 2;
   scene.add(mesh);
   horseBlob = mesh;
 }
@@ -6987,7 +6987,7 @@ const HorseMotion = {
     // from sprint to the normal gallop speed instead of snapping (which read as a
     // brief stop). Ramp up fast, ease down gently.
     const sprintTarget = isSprinting ? SPRINT_MULT : 1.0;
-    sprintMultCurrent = THREE.MathUtils.lerp(sprintMultCurrent, sprintTarget, dt * (isSprinting ? 8 : 3));
+    sprintMultCurrent = THREE.MathUtils.lerp(sprintMultCurrent, sprintTarget, dt * (isSprinting ? 8 : 6));
     const sprintMult = sprintMultCurrent;
     if (Math.abs(input.forward) > 0.1) {
       runTimer += dt;
@@ -7003,7 +7003,10 @@ const HorseMotion = {
     } else {
       runTimer = 0;
       currentMaxSpeed = BASE_SPEED;
-      horseSpeed = THREE.MathUtils.lerp(horseSpeed, 0, dt * 8);
+      // Brake harder and snap the tail to zero — the old gentle decay left a long
+      // exponential slide (worse the faster you were going, e.g. after a sprint).
+      horseSpeed = THREE.MathUtils.lerp(horseSpeed, 0, dt * 14);
+      if (Math.abs(horseSpeed) < 0.3) horseSpeed = 0;
     }
 
     if (Math.abs(horseSpeed) > 0.01) this._move(dt);
@@ -7155,7 +7158,7 @@ function update() {
     const gh = getTerrainHeight(horsePos.x, horsePos.z);
     const lift = Math.max(0, horsePos.y - gh);
     const k = Math.max(0.45, 1 - lift * 0.18);
-    horseBlob.position.set(horsePos.x, gh + 0.05, horsePos.z);
+    horseBlob.position.set(horsePos.x, gh + 0.15, horsePos.z); // clear ground patches (road/farm disc) that sit above the terrain sample
     horseBlob.scale.set(k, k, 1);
     horseBlob.material.opacity = 0.4 * k;
   }
