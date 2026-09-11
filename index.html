@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 51, label: 'Zmiana konia w stajni' };
+const GAME_VERSION = { number: 52, label: 'Fix: maść mimo wyczesania' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -645,6 +645,10 @@ let isMobile = false;
 // alone isn't enough — a big tablet is a supported target and shouldn't get
 // 60% UI. Set alongside isMobile in initInput.
 let compactUI = false;
+// uiScale: overlay boxes are tuned for a 16" laptop / tablet. Shrink them a step
+// on 14" laptops (medium) and more on phones (compact) so they don't swallow the
+// view. 1 = full (>=1000px min dim), 0.82 = medium (14"), 0.6 = compact/phone.
+let uiScale = 1;
 
 // Tree positions (for collision avoidance)
 let treePositions = [];
@@ -1768,8 +1772,10 @@ function paintCoat() {
   const ctx = _coatCanvas.getContext('2d');
   ctx.globalCompositeOperation = 'source-over';
   const hex = '#' + coatColor.toString(16).padStart(6, '0');
-  // Once groomed, wear the "beautiful" spa skin; otherwise the ordinary coat skin.
-  const skinImg = (groomLevel >= 1 && coatGroomedImg) ? coatGroomedImg : coatWhiteImg;
+  // Once groomed, wear the "beautiful" spa skin — but only for the white coat
+  // (the groomed texture is a prettier white). A chosen maść (gniady/bułany) must
+  // always show through; grooming then adds shine via the material, not a re-skin.
+  const skinImg = (coatSkin === 'white' && groomLevel >= 1 && coatGroomedImg) ? coatGroomedImg : coatWhiteImg;
   if (skinImg) {
     // Purpose-made coat skin (same UV) — already finished, draw as-is.
     ctx.drawImage(skinImg, 0, 0, S, S);
