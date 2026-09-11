@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 58, label: 'UI mniejsze na 14" laptopach' };
+const GAME_VERSION = { number: 59, label: 'Bez popupu skacz 🏁' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3097,10 +3097,6 @@ function updateHippodrome(dt) {
       H.counter += 1;
       hippoUpdateHUD();
       spawnConfetti({ x: h.cx, y: getTerrainHeight(h.cx, h.cz) + 1.5, z: h.cz });
-    } else if (d < H.jumpR && !airborneRecently && (clock.elapsedTime - H._nudgeAt) > 2.5) {
-      H._nudgeAt = clock.elapsedTime;
-      showTransientPopup('hippo-jump', { top: 28, fontSize: 44, pad: '16px 38px', radius: 24, duration: 1200, popScale: 1.15, transition: 0.25 },
-        `<div style="font-size:66px;line-height:1">⤴️</div><div style="margin-top:2px">Naciśnij E — skacz!</div>`);
     }
   }
   // Cue points at the next gate, or back to the FINISH line once all are cleared.
