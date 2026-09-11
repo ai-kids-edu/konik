@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 43, label: 'Czytelny start hipodromu 🏇' };
+const GAME_VERSION = { number: 44, label: 'Wydajność: woda + światła' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1208,7 +1208,7 @@ function animateClouds(dt) {
 let waterMesh;
 function createWater() {
   // Near-shore water (detailed, follows curved shoreline)
-  const segs = 40;
+  const segs = 28; // gentle waves don't need 40² verts; fewer = cheaper CPU wave pass + upload
   const nearGeo = new THREE.PlaneGeometry(NEAR_WATER_WIDTH, 60, segs, segs);
   nearGeo.rotateX(-Math.PI / 2);
   const positions = nearGeo.attributes.position.array;
@@ -5805,12 +5805,18 @@ function createChallenge() {
   signBack.position.set(0, 4.2, -0.1);
   group.add(signBack);
 
-  // Warm glow on the ground — visible beacon
-  const glow = new THREE.PointLight(0xffdd44, 1.0, 15);
-  glow.position.set(0, 3, 0);
-  group.add(glow);
-  // Glowing sphere on top of each post
-  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xffee44, emissive: 0xffdd22, emissiveIntensity: 0.8 });
+  // Warm glow on the ground — a flat emissive disc instead of a real PointLight.
+  // Up to 3 challenges are live at once; 3 extra dynamic lights raised the shader
+  // cost of every nearby Standard material. This costs nothing to light.
+  const glowDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(6, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffdd66, transparent: true, opacity: 0.22, depthWrite: false })
+  );
+  glowDisc.rotation.x = -Math.PI / 2;
+  glowDisc.position.set(0, 0.06, 0);
+  group.add(glowDisc);
+  // Glowing sphere on top of each post (brighter now the real light is gone)
+  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xffee44, emissive: 0xffdd22, emissiveIntensity: 1.2 });
   for (const side of [-1, 1]) {
     const orb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), beaconMat);
     orb.position.set(side * 5.5, 4.9, 0);
@@ -7004,9 +7010,9 @@ function update() {
   }
 
   // Animate water, clouds, and birds
-  // Animate water every 2nd frame
+  // Animate water every 4th frame (CPU wave pass + full vertex-buffer re-upload)
   window.__waterFrame = (window.__waterFrame || 0) + 1;
-  if (window.__waterFrame % 2 === 0) animateWater(clock.elapsedTime);
+  if (window.__waterFrame % 4 === 0) animateWater(clock.elapsedTime);
   animateClouds(dt);
   animateBirds(dt);
   animateTumbleweeds(dt);
