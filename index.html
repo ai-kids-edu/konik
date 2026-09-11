@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 56, label: 'Fix: krótszy poślizg + cień na wierzchu' };
+const GAME_VERSION = { number: 57, label: 'Tor niebieski + brama mety 🏁' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2675,8 +2675,8 @@ function buildHippodrome() {
     x: ((wx - H.cx) / H.halfX * 0.5 + 0.5) * pc.width,
     y: (1 - ((H.cz - wz) / H.halfZ * 0.5 + 0.5)) * pc.height,
   });
-  // Packed-dirt lane traced along the figure-8.
-  pg.strokeStyle = '#c8ad7c'; pg.lineWidth = 34; pg.lineJoin = 'round';
+  // Soft blue lane traced along the figure-8 (a gentle painted guide).
+  pg.strokeStyle = 'rgba(140,196,236,0.6)'; pg.lineWidth = 34; pg.lineJoin = 'round';
   pg.beginPath();
   for (let s = 0; s <= 120; s++) {
     const p = H.path((s / 120) * Math.PI * 2), c = w2c(p.x, p.z);
@@ -2823,13 +2823,19 @@ function buildHippodrome() {
     H.hurdles.push({ idx: i, cx: gx, cz: gz, group: hg, rail, collider, cleared: false, state: 'live' });
   }
 
-  // START / FINISH gate: two tall poles flanking the checkered line at the top of
-  // the 8, with a banner. The kid rides through here to begin, and again to finish.
+  // START / FINISH: a tall overhead gantry (banner high above head height) so it
+  // reads as a finish line to ride under — NOT a jump gate like the numbered ones.
   const sfp = H.startPt || H.path(Math.PI / 2);
-  for (const sx of [-2.4, 2.4]) {
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 3.6, 8), _mat(0xffffff, 0.6));
-    pole.position.set(sfp.x + sx, getTerrainHeight(sfp.x + sx, sfp.z) + 1.8, sfp.z);
-    group.add(pole);
+  const sfY = getTerrainHeight(sfp.x, sfp.z);
+  for (const sx of [-3.0, 3.0]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 6.6, 8), _mat(0xffffff, 0.6));
+    pole.position.set(sfp.x + sx, sfY + 3.3, sfp.z);
+    pole.castShadow = true; group.add(pole);
+    // A little triangular pennant on top of each pole.
+    const pen = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.5),
+      new THREE.MeshStandardMaterial({ color: 0x4dc94d, emissive: 0x2a7a2a, emissiveIntensity: 0.4, side: THREE.DoubleSide }));
+    pen.position.set(sfp.x + sx + (sx < 0 ? 0.5 : -0.5), sfY + 6.4, sfp.z);
+    group.add(pen);
   }
   const sfCanvas = document.createElement('canvas');
   sfCanvas.width = 256; sfCanvas.height = 48;
@@ -2838,9 +2844,9 @@ function buildHippodrome() {
   sfg.fillStyle = '#1c6b1c'; sfg.fillRect(0, 24, 256, 24);
   sfg.fillStyle = '#fff'; sfg.font = 'bold 20px Arial'; sfg.textAlign = 'center'; sfg.textBaseline = 'middle';
   sfg.fillText('START · META', 128, 37);
-  const sfBoard = new THREE.Mesh(new THREE.PlaneGeometry(5.0, 0.94),
+  const sfBoard = new THREE.Mesh(new THREE.PlaneGeometry(6.2, 1.16),
     new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sfCanvas), side: THREE.DoubleSide }));
-  sfBoard.position.set(sp.x, getTerrainHeight(sp.x, sp.z) + 3.4, sp.z);
+  sfBoard.position.set(sfp.x, sfY + 5.9, sfp.z); // overhead, well clear of jump height
   group.add(sfBoard);
 
   // Target banner (the goal number), facing north so it's read on approach.
