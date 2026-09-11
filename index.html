@@ -400,6 +400,7 @@ const _params = new URLSearchParams(location.search);
 const SAVE_NAME = (_params.get('save_name') || '').replace(/[^a-z0-9_-]/gi, '');
 const SAVE_KEY = SAVE_NAME ? `horseGameState_${SAVE_NAME}` : 'horseGameState';
 const CHEAT_CASH = parseInt(_params.get('cash') || '0', 10) || 0;
+const CHEAT_GROOM = _params.has('groom') ? Math.max(0, Math.min(3, parseInt(_params.get('groom'), 10) || 0)) : -1; // -1 = off
 
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
@@ -463,6 +464,8 @@ const MODEL_MANIFEST = {
   crate: 'models/Crate.glb',
   woodlog: 'models/WoodLog.glb',
   palmtree: 'models/PalmTree.glb',
+  // Grooming accessories
+  bow: 'models/bow.glb', // Bowtie by jeremy (poly.pizza) CC BY 3.0 — stage-2 mane bow
 };
 
 async function loadAllModels(onProgress) {
@@ -1669,11 +1672,37 @@ function initCoatPicker() {
 initCoatPicker();
 let _coatCanvas = null, _coatTex = null, _hairCanvas = null, _hairTex = null;
 
+// Stage-2 bow: a real Bowtie GLB (poly.pizza, CC BY) parented to the mane bone
+// so it rides the neck as the horse moves — no floating primitive.
+const BOW_NATIVE_MAX = 10.04;  // largest extent of bow.glb in native units
+const BOW_WORLD_SIZE = 0.8;    // desired on-horse size in metres
 function ensureGroomAccessories() {
-  if (groomAccessories || !horseGroup) return groomAccessories;
+  if (groomAccessories || !horse) return groomAccessories;
   const bow = buildGroomBow();
+  if (!bow) return null;
+  // Attach to the top-of-neck bone (where the mane crest sits); fall back down
+  // the neck, then to the whole horse group if the skeleton lacks the name.
+  let bone = null;
+  horse.traverse(o => { if (o.isBone && /neck_03/i.test(o.name)) bone = o; });
+  if (!bone) horse.traverse(o => { if (!bone && o.isBone && /neck_02/i.test(o.name)) bone = o; });
+  const parent = bone || horseGroup;
+  parent.add(bow);
+  parent.updateWorldMatrix(true, false);
+  const ws = new THREE.Vector3(); parent.getWorldScale(ws);
+  const s = ws.x || 1;                       // bones carry the armature's 100x scale
+  bow.scale.setScalar(BOW_WORLD_SIZE / BOW_NATIVE_MAX / s);
+  if (bone) {
+    // Cancel the bone's bind rotation so the bow sits upright at rest, then still
+    // follows the bone through the animation. Place it just above the crest.
+    const wq = new THREE.Quaternion(); bone.getWorldQuaternion(wq);
+    bow.quaternion.copy(wq.clone().invert()); // upright, face toward rear (default camera)
+    bow.rotateZ(Math.PI / 2);                  // stand it portrait: a tall mane bow, not a wide band
+    const wp = new THREE.Vector3(); bone.getWorldPosition(wp);
+    bow.position.copy(bone.worldToLocal(wp.clone().add(new THREE.Vector3(0, 0.24, 0.02))));
+  } else {
+    bow.position.set(0, 1.95, 0.35);
+  }
   bow.visible = false;
-  horseGroup.add(bow);
   groomAccessories = { bow };
   return groomAccessories;
 }
@@ -1723,9 +1752,15 @@ function paintCoat() {
   for (const m of horseCoatMats) { m.map = _coatTex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
 }
 
-// Stage 3: rainbow mane + tail, painted onto the shared Hair material.
-function paintHairRainbow() {
-  if (!horseHairMats.length) return;
+// Stage 3: rainbow mane + tail. Prefers a purpose-made skin (same Hair UV,
+// painted over the model's strand detail) at models/horse_hair_rainbow.webp;
+// falls back to a procedural vertical gradient if that file is absent.
+let _hairRainbowTex = null;      // loaded skin texture (null until/unless present)
+let _hairRainbowTried = false;   // load attempted (avoid re-requesting a 404)
+function applyHairMap(tex) {
+  for (const m of horseHairMats) { m.map = tex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
+}
+function paintHairProceduralRainbow() {
   if (!_hairCanvas) { _hairCanvas = document.createElement('canvas'); _hairCanvas.width = 16; _hairCanvas.height = 128; }
   const ctx = _hairCanvas.getContext('2d');
   const grad = ctx.createLinearGradient(0, 0, 0, 128);
@@ -1733,7 +1768,18 @@ function paintHairRainbow() {
     .forEach((c, i, a) => grad.addColorStop(i / (a.length - 1), c));
   ctx.fillStyle = grad; ctx.fillRect(0, 0, 16, 128);
   if (!_hairTex) { _hairTex = new THREE.CanvasTexture(_hairCanvas); _hairTex.colorSpace = THREE.SRGBColorSpace; _hairTex.flipY = false; }
-  for (const m of horseHairMats) { m.map = _hairTex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
+  applyHairMap(_hairTex);
+}
+function paintHairRainbow() {
+  if (!horseHairMats.length) return;
+  if (_hairRainbowTex) { applyHairMap(_hairRainbowTex); return; }
+  paintHairProceduralRainbow(); // show something now; swap in the skin when it loads
+  if (_hairRainbowTried) return;
+  _hairRainbowTried = true;
+  new THREE.TextureLoader().load('models/horse_hair_rainbow.webp',
+    (t) => { t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; _hairRainbowTex = t;
+             if (groomLevel >= 3) applyHairMap(t); },   // upgrade in place once ready
+    undefined, () => {});                                // absent → keep procedural
 }
 function restoreHair() {
   for (const m of horseHairMats) { m.map = hairOrigMaps.get(m) || null; m.needsUpdate = true; }
@@ -1783,17 +1829,15 @@ function updateMud() {
 }
 
 function buildGroomBow() {
-  const bow = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0xff4d94, roughness: 0.45, emissive: 0x551133, emissiveIntensity: 0.35 });
-  bow.add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat));
-  for (const s of [-1, 1]) {
-    const loop = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.26, 10), mat);
-    loop.position.set(s * 0.16, 0, 0);
-    loop.rotation.z = s * Math.PI / 2;
-    bow.add(loop);
-  }
-  bow.scale.setScalar(1.4);
-  bow.position.set(0, 1.85, 0.5); // on the neck of the new model; tune if needed
+  const bow = cloneModel('bow', 1); // Bowtie GLB; scale/placement set by caller
+  if (!bow) return null;
+  bow.traverse(c => {
+    if (!c.isMesh) return;
+    c.material.color && c.material.color.setHex(0xff4d94); // pretty pink
+    if ('roughness' in c.material) c.material.roughness = 0.4;
+    if (c.material.emissive) { c.material.emissive.setHex(0x551133); c.material.emissiveIntensity = 0.3; }
+    c.castShadow = false;
+  });
   return bow;
 }
 
@@ -7069,6 +7113,8 @@ window.startGame = async function () {
   // Testing top-up via ?cash=N — only inside a named test slot, so the shared
   // family save can never be cheated/polluted by a stray ?cash in the URL.
   if (CHEAT_CASH && SAVE_NAME) { money += CHEAT_CASH; updateCarrotHUD(); }
+  // Preview a grooming stage directly via ?groom=N (test slots only).
+  if (CHEAT_GROOM >= 0 && SAVE_NAME) { groomLevel = CHEAT_GROOM; refreshHorseLook(); }
 
   // Assign initial passenger delivery quests to townspeople
   if (farmers.length > 0) assignNewPassengerQuest();
