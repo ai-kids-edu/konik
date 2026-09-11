@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 48, label: 'Fake blob pod koniem' };
+const GAME_VERSION = { number: 49, label: 'Tor owal + farma zamknięta 🏇' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2549,21 +2549,21 @@ function createWildWestTown() {
 // Reaching the target hurdle wins. There is no wrong number to pick: the child
 // PERFORMS the count with their body (one deliberate jump = +1), which is exactly
 // what makes it brute-proof and what the unsure kid needs to feel.
-// The lane runs NORTH→SOUTH along Z (the corridor has ~300m of room, so hurdles
-// get real run-up between them). The kid enters the north gap and gallops south;
-// each hurdle sits further south, so the number line grows in the travel direction.
+// A real show-jumping COURSE: gates arranged around an oval inside the fenced
+// arena. The kid rides the loop and jumps each gate; the HUD counts how many
+// gates were cleared this lap. Clearing them all = a clean round (rosette).
 const HIPPO = {
   cx: -50, cz: -150,          // arena centre (empty western outskirts)
-  halfX: 22, halfZ: 50,       // fence half-extents (long along Z for run-up)
-  laneX: -50,                 // lane centreline (runs along Z)
-  slot1Z: -112, spacing: 10,  // hurdle slot 1 (northernmost) and spacing southward
-  maxSlot: 9,                 // hurdles 1..9 = number line up to 9
-  arenaSpeed: 9.0,            // canter cap: fast enough to feel, one jump = one hurdle
-  hurdles: [],                // per-slot { slot, z, group, rail, plaque, state }
+  halfX: 22, halfZ: 50,       // fence half-extents
+  laneX: -50,                 // (kept: north entrance sits on the lane centre)
+  rx: 16, rz: 38,             // oval course radii (fits inside the fence)
+  courseGates: 6,             // gates around the loop
+  jumpR: 3.0,                 // clear radius — jump within this of a gate = cleared
+  arenaSpeed: 9.0,            // canter cap inside the ring
+  hurdles: [],                // per-gate { idx, cx, cz, group, rail, state, cleared, _touched }
   startFlag: null, banner: null, bannerBoard: null, hud: null, beacon: null,
-  addend: 4, target: 9, counter: 4, armed: false, won: false,
-  _startZ: -999, _prevZ: 9999, _prevJump: false, _winTimer: 0, cue: null,
-  slotZ(i) { return this.slot1Z - (i - 1) * this.spacing; }, // south = more negative
+  goal: 6, counter: 0, won: false,
+  _prevJump: false, _jumpGrace: -1, _winTimer: 0, cue: null,
   contains(x, z) {
     return x > this.cx - this.halfX && x < this.cx + this.halfX
         && z > this.cz - this.halfZ && z < this.cz + this.halfZ;
@@ -2703,14 +2703,19 @@ function buildHippodrome() {
   scene.add(cue);
   H.cue = cue;
 
-  // Hurdles: one per slot, built once and re-posed each round. The rail spans the
-  // lane width (along X); the kid gallops south and jumps over it.
+  // Gates around the oval course. Each gate faces along the path (its rail spans
+  // across the track) so the kid jumps it while riding the loop.
   const railMat = _mat(0xd94f6a, 0.7);   // live = bright red-pink
   const standMat = _mat(0xf3ede0, 0.85);
-  for (let i = 1; i <= H.maxSlot; i++) {
-    const z = H.slotZ(i);
+  const N = H.courseGates;
+  for (let i = 0; i < N; i++) {
+    const th = Math.PI / 2 - (i / N) * Math.PI * 2; // gate 0 at the north, clockwise
+    const gx = H.cx + H.rx * Math.cos(th);
+    const gz = H.cz + H.rz * Math.sin(th);
+    const tx = -H.rx * Math.sin(th), tz = H.rz * Math.cos(th); // tangent (travel dir)
     const hg = new THREE.Group();
-    hg.position.set(H.laneX, getTerrainHeight(H.laneX, z), z);
+    hg.position.set(gx, getTerrainHeight(gx, gz), gz);
+    hg.rotation.y = Math.atan2(tx, tz); // local +Z along the path
     for (const sx of [-2.0, 2.0]) {
       const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8), standMat);
       stand.position.set(sx, 0.75, 0);
@@ -2719,11 +2724,14 @@ function buildHippodrome() {
     const rail = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.14, 0.14), railMat.clone());
     rail.position.set(0, 1.0, 0);
     rail.castShadow = true; hg.add(rail);
-    const plaque = _hippoPlaque(i, true);
-    plaque.position.set(0, 1.7, 0.7); // north face, toward the incoming kid
-    hg.add(plaque);
     group.add(hg);
-    H.hurdles.push({ slot: i, z, group: hg, rail, plaque, cleared: false, state: 'live' });
+    // Jumpable collider spanning the rail: a grounded horse bounces off it (must
+    // jump), an airborne horse clears it. AABB bounds the rotated 4m rail.
+    const rotY = hg.rotation.y;
+    const exX = 2.0 * Math.abs(Math.cos(rotY)) + 0.35;
+    const exZ = 2.0 * Math.abs(Math.sin(rotY)) + 0.35;
+    const collider = { minX: gx - exX, maxX: gx + exX, minZ: gz - exZ, maxZ: gz + exZ, jumpable: true };
+    H.hurdles.push({ idx: i, cx: gx, cz: gz, group: hg, rail, collider, cleared: false, state: 'live', _touched: false });
   }
 
   // Start flag (green, marks "you already have this many"), beside the lane.
@@ -2773,7 +2781,7 @@ function buildHippodrome() {
 
   // Debug handle (only with ?debug) for scripted verification of the arena logic.
   if (new URLSearchParams(location.search).has('debug')) {
-    window.__hippo = { HIPPO, newRound: hippoNewRound, win: hippoWin, reset: hippoResetAttempt, barnColliders };
+    window.__hippo = { HIPPO, newRound: hippoNewRound, win: hippoWin, barnColliders };
   }
 }
 
@@ -2790,84 +2798,67 @@ function _hippoStartTag() {
   return m;
 }
 
-// Pick a fresh 4+?=9 style problem and re-pose the hurdles / flag / banner.
-function hippoNewRound() {
-  const H = HIPPO;
-  H.addend = 2 + Math.floor(Math.random() * 4);      // 2..5
-  const gap = 2 + Math.floor(Math.random() * 3);      // 2..4
-  H.target = Math.min(H.addend + gap, H.maxSlot);
-  if (H.target <= H.addend) H.target = H.addend + 2;
-  H.counter = H.addend;
-  H.armed = false;
-  H.won = false;
-
-  for (const h of H.hurdles) {
-    if (h.slot <= H.addend) {
-      // Already counted — hidden so the lane before the start flag stays clean.
-      // The "you already have N" count lives on the start flag + HUD instead of
-      // as flattened rails with floating number cards (which read as litter).
-      h.state = 'done'; h.cleared = true;
-      h.group.visible = false;
-    } else if (h.slot <= H.target) {
-      h.state = 'live'; h.cleared = false;
-      h.group.visible = true;
-      h.rail.rotation.x = 0;
-      h.rail.position.y = 1.0;
-      h.rail.material.color.set(0xd94f6a);
-      h.rail.material.emissive.set(0x000000);
-      h.plaque.material.map = _hippoNumberCanvas(h.slot, '#fff6df', '#7a3b0a');
-      h.plaque.material.needsUpdate = true;
-    } else {
-      h.state = 'hidden';
-      h.group.visible = false;
-    }
-  }
-
-  const flagX = H.laneX - 3, flagZ = H.slotZ(H.addend) + 2.4;
-  H._startZ = flagZ; // arm exactly where the flag is drawn
-  H.startFlag.position.set(flagX, getTerrainHeight(flagX, flagZ), flagZ);
-  H.startBoard.material.map = _hippoNumberCanvas(H.addend, '#dff5df', '#2a7a2a'); // "you have N"
-  H.startBoard.material.needsUpdate = true;
-  const bannerZ = H.slotZ(H.target);
-  H.banner.position.set(H.laneX, getTerrainHeight(H.laneX, bannerZ), bannerZ);
-  H.bannerBoard.material.map = _hippoNumberCanvas(H.target, '#ffe7f3', '#a01e5a');
-  H.bannerBoard.material.needsUpdate = true;
-
-  hippoUpdateHUD(true);
+// Show-jumping course: ride the oval and jump each gate. A gate is a jumpable
+// collider — a grounded horse bounces off it (you must jump), an airborne horse
+// clears it. Clearing a gate lights it green and opens it; clear all the gates on
+// the lap to win a rosette. No equations, no lost progress — just the joy of
+// learning to jump a real course.
+function hippoSetCollider(h, on) {
+  const i = barnColliders.indexOf(h.collider);
+  if (on && i < 0) barnColliders.push(h.collider);
+  else if (!on && i >= 0) barnColliders.splice(i, 1);
 }
 
-function hippoUpdateHUD(preview) {
+function hippoRaiseRail(h) {
+  h.cleared = false; h._touched = false;
+  h.rail.material.color.set(0xd94f6a);
+  h.rail.material.emissive.set(0x000000);
+  h.rail.material.emissiveIntensity = 0;
+  hippoSetCollider(h, true); // solid again — the horse must jump it
+}
+
+function hippoNewRound() {
+  const H = HIPPO;
+  H.counter = 0;
+  H.goal = H.hurdles.length; // clear every gate on the loop
+  H.won = false;
+  H.startFlag.visible = false; // no start line — ride the loop freely
+  for (const h of H.hurdles) { h.group.visible = true; hippoRaiseRail(h); }
+  // Banner near the entrance shows how many gates the course has.
+  H.banner.position.set(H.laneX, getTerrainHeight(H.laneX, H.cz + H.halfZ - 8), H.cz + H.halfZ - 8);
+  H.bannerBoard.material.map = _hippoNumberCanvas(H.goal, '#ffe7f3', '#a01e5a');
+  H.bannerBoard.material.needsUpdate = true;
+  hippoUpdateHUD();
+}
+
+function hippoUpdateHUD() {
   const H = HIPPO;
   if (!H.hud) return;
   const dots = [];
-  for (let i = 1; i <= H.target; i++) {
+  for (let i = 1; i <= H.goal; i++) {
     const filled = i <= H.counter;
-    dots.push(`<span style="display:inline-block;width:26px;height:26px;margin:0 3px;border-radius:50%;`
-      + (filled ? 'background:#ffd944;box-shadow:0 0 6px #ffd944;' : 'background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.5);')
+    dots.push(`<span style="display:inline-block;width:28px;height:28px;margin:0 4px;border-radius:50%;`
+      + (filled ? 'background:#ffd944;box-shadow:0 0 8px #ffd944;' : 'background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.5);')
       + `"></span>`);
   }
-  const head = preview
-    ? `Masz <span style="color:#8dff8d">${H.addend}</span> — doskocz do <span style="color:#ffd944">${H.target}</span>!`
-    : `<span style="color:#8dff8d">${H.addend}</span> + <span style="color:#ff9ecb">${H.counter - H.addend}</span> = <span style="color:#ffd944">${H.counter}</span>`;
-  H.hud.innerHTML = `<div style="font-size:30px;margin-bottom:8px">🏇 ${head}</div>`
+  H.hud.innerHTML = `<div style="font-size:30px;margin-bottom:8px">🏇 Bramki: <span style="color:#ffd944">${H.counter} / ${H.goal}</span></div>`
     + `<div style="line-height:1">${dots.join('')}</div>`;
 }
 
 function hippoWin() {
   const H = HIPPO;
   H.won = true;
-  const gap = H.target - H.addend;
-  const reward = 3 + gap;
+  const reward = 5 + H.goal;
   money += reward;
   rosettes += 1;
   updateCarrotHUD();
   spawnConfetti(horsePos);
   spawnCoinBurst(horsePos.x, horsePos.z, 16);
   showTransientPopup('hippo-win', { top: 30, fontSize: 46, pad: '22px 46px', radius: 26, duration: 2400, popScale: 1.15, transition: 0.3 },
-    `<div>🏵️ <b>BRAWO!</b> 🏵️</div>`
-    + `<div style="font-size:56px;margin-top:8px">${H.addend} + ${gap} = ${H.target}</div>`
-    + `<div style="font-size:34px;margin-top:8px">+${reward} 🪙</div>`);
-  H._winTimer = 2.8;
+    `<div>🏵️ <b>CZYSTY PRZEJAZD!</b> 🏵️</div>`
+    + `<div style="font-size:40px;margin-top:8px">Wszystkie ${H.goal} bramek!</div>`
+    + `<div style="font-size:34px;margin-top:8px">+1 🏵️  +${reward} 🪙</div>`);
+  H._winTimer = 3.0;
 }
 
 let hippoBuilt = false;
@@ -2875,6 +2866,7 @@ function updateHippodrome(dt) {
   const H = HIPPO;
   if (!hippoBuilt) return;
   H.beacon.material.emissiveIntensity = 0.5 + (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
+  if (isJumping) H._jumpGrace = clock.elapsedTime;
 
   if (H._winTimer > 0) {
     H._winTimer -= dt;
@@ -2882,69 +2874,42 @@ function updateHippodrome(dt) {
   }
 
   H.cue.visible = false;
-  const hz = horsePos.z, inside = H.contains(horsePos.x, hz);
-  if (!inside) {
+  const inside = H.contains(horsePos.x, horsePos.z);
+  if (!inside || H.won) {
     if (H.hud.style.opacity !== '0') H.hud.style.opacity = '0';
-    if (H.armed && !H.won) { H.armed = false; hippoResetAttempt(); }
-    H._prevZ = hz; H._prevJump = isJumping;
     return;
   }
   H.hud.style.opacity = '1';
 
-  // Arm when the kid crosses the start flag heading south (z decreasing).
-  if (!H.armed && !H.won && H._prevZ > H._startZ && hz <= H._startZ) {
-    H.armed = true; H.counter = H.addend; hippoUpdateHUD(false);
-  }
-
-  if (H.armed && !H.won) {
-    const expected = H.hurdles.find(h => h.state === 'live' && !h.cleared);
-    if (expected) {
-      // Pulse the next hurdle + hover a bobbing arrow over it so a non-reader
-      // knows exactly where to jump next.
-      expected.rail.material.emissive.set(0xff5577);
-      expected.rail.material.emissiveIntensity = 0.25 + (Math.sin(clock.elapsedTime * 6) + 1) * 0.45;
-      H.cue.visible = true;
-      H.cue.position.set(H.laneX, getTerrainHeight(H.laneX, expected.z) + 2.4 + Math.sin(clock.elapsedTime * 4) * 0.2, expected.z);
-      // Crossing the expected hurdle decides it — exactly one crossing per jump
-      // (arc ~7.2m < 10m spacing), so airborne = cleared, on the ground = knocked.
-      if (H._prevZ > expected.z && hz <= expected.z) {
-        if (isJumping || H._prevJump) {
-          expected.cleared = true;
-          expected.rail.material.color.set(0x5ad15a);
-          expected.rail.material.emissive.set(0x2a7a2a);
-          expected.rail.material.emissiveIntensity = 0.6;
-          H.counter += 1;
-          hippoUpdateHUD(false);
-          spawnConfetti({ x: H.laneX, y: getTerrainHeight(H.laneX, expected.z) + 1.5, z: expected.z });
-          if (H.counter >= H.target) hippoWin();
-        } else {
-          // Rode through on the ground — knock it, restart the (short) run.
-          expected.rail.rotation.x = 0.6;
-          showTransientPopup('hippo-miss', { top: 28, fontSize: 44, pad: '18px 40px', radius: 24, duration: 1500, popScale: 1.15, transition: 0.3 },
-            `<div style="font-size:70px;line-height:1">⤴️</div><div style="margin-top:4px">Przeskocz płotek!</div>`);
-          hippoResetAttempt();
-        }
-      }
+  // Forgiving clear: jumping within `jumpR` of a gate (a short airborne grace
+  // covers imperfect timing) counts — no need to clip the exact rail edge.
+  const airborneRecently = isJumping || (clock.elapsedTime - H._jumpGrace < 0.4);
+  let nearest = null, nd = Infinity;
+  for (const h of H.hurdles) {
+    if (h.state !== 'live' || h.cleared) continue;
+    const dx = horsePos.x - h.cx, dz = horsePos.z - h.cz;
+    const d = Math.hypot(dx, dz);
+    if (d < nd) { nd = d; nearest = h; }
+    // Gentle pulse to mark gates still to jump.
+    h.rail.material.emissive.set(0xff5577);
+    h.rail.material.emissiveIntensity = 0.2 + (Math.sin(clock.elapsedTime * 6) + 1) * 0.35;
+    if (d < H.jumpR && airborneRecently) {
+      // Jumped it — cleared! Open the gate (drop its collider) and light it green.
+      h.cleared = true;
+      hippoSetCollider(h, false);
+      h.rail.material.color.set(0x5ad15a);
+      h.rail.material.emissive.set(0x2a7a2a);
+      h.rail.material.emissiveIntensity = 0.6;
+      H.counter += 1;
+      hippoUpdateHUD();
+      spawnConfetti({ x: h.cx, y: getTerrainHeight(h.cx, h.cz) + 1.5, z: h.cz });
+      if (H.counter >= H.goal) hippoWin();
     }
   }
-
-  H._prevZ = hz; H._prevJump = isJumping;
-}
-
-// Re-raise the live hurdles and restart the count at the addend (no punishment).
-function hippoResetAttempt() {
-  const H = HIPPO;
-  H.counter = H.addend;
-  for (const h of H.hurdles) {
-    if (h.state !== 'live') continue;
-    h.cleared = false;
-    h.rail.rotation.x = 0;
-    h.rail.position.y = 1.0;
-    h.rail.material.color.set(0xd94f6a);
-    h.rail.material.emissive.set(0x000000);
-    h.rail.material.emissiveIntensity = 0;
+  if (nearest) {
+    H.cue.visible = true;
+    H.cue.position.set(nearest.cx, getTerrainHeight(nearest.cx, nearest.cz) + 2.4 + Math.sin(clock.elapsedTime * 4) * 0.2, nearest.cz);
   }
-  hippoUpdateHUD(!H.armed);
 }
 
 // Common materials/helpers
@@ -4944,10 +4909,8 @@ function createFarm() {
   // Use simple geometry fence posts + rails instead (looks better and consistent)
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xb08040, roughness: 0.8 });
   const postCount = 24;
-  // Gate: leave a gap in the ring on the side facing the road/spawn (+X) so the
-  // kid can ride straight in. Elsewhere the fence is solid — but jumpable.
-  const GATE_ANGLE = 0, GATE_HALF = 0.42; // radians of arc kept open
-  const inGate = (a) => Math.abs(Math.atan2(Math.sin(a - GATE_ANGLE), Math.cos(a - GATE_ANGLE))) < GATE_HALF;
+  // The paddock is fully closed and solid — but every segment is jumpable, so the
+  // kid gets in by jumping the fence (E), just like a real horse.
   for (let i = 0; i < postCount; i++) {
     const angle = (i / postCount) * Math.PI * 2;
     const px = fx + Math.cos(angle) * FARM_RADIUS;
@@ -4957,9 +4920,6 @@ function createFarm() {
     const nx = fx + Math.cos(nextAngle) * FARM_RADIUS;
     const nz = fz + Math.sin(nextAngle) * FARM_RADIUS;
     const nh = getTerrainHeight(nx, nz);
-    // Skip the whole segment (post + rails + collider) inside the gate arc.
-    const segMidAngle = (angle + nextAngle) / 2;
-    if (inGate(angle) || inGate(segMidAngle)) continue;
 
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 6), fenceMat);
     post.position.set(px, ph + 0.6, pz);
@@ -5714,6 +5674,10 @@ function createChallenge() {
     });
     if (!tooClose && !inFarm && !inStable && !tooCloseToChallenge) break;
   }
+  // If the search fell through without a clear spot and landed inside the
+  // hipodrom, shove it just east of the arena — a counting gate must never sit on
+  // the jumping course.
+  if (inHippoFootprint(cx, cz, 8)) cx = -20;
   // Final clamp to keep on land + inside world bounds
   if (cz > waterStartZ(cx) - 5) cz = waterStartZ(cx) - 5;
   if (cz < CITY_SOUTH_EDGE + 20) cz = CITY_SOUTH_EDGE + 20;

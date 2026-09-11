@@ -268,3 +268,14 @@ Ogólny **przeskok płotów**: `barnColliders` z flagą `jumpable` są pomijane,
 i wysoko (`_barnBlocked`). Budynki NIE jumpable. Płot **farmy** dostał kolizję (20 segmentów) z
 **bramą** od strony drogi (+X). Arena: płot też jumpable (można wyskoczyć). Mobile skok = przycisk ⤴️
 (zawsze na dole prawego stosu). Zweryfikowane statycznie: 8 solid budynków + 25 jumpable płotów.
+
+### v45 — hipodrom przeprojektowany: prawdziwa trasa (owal) + fizyka skoku
+Po testach: dopełnianie było frustrujące/niejasne. Zmiana na **zabawę w skakanie** jak na zawodach.
+- **Owalna trasa** 6 bramek (`rx16 rz38`) w arenie — jeździsz w kółko i skaczesz każdą.
+- **Bramka = jumpable collider**: na ziemi odbija (trzeba skoczyć), w locie przelatujesz = zaliczona.
+  Znika collider zaliczonej (otwarta). Rozwiązuje „nie łapało nad krawędzią".
+- **Forgiving**: zalicza gdy skok w promieniu `jumpR 3 m` + okno 0.4 s (nie sztywna linia).
+- HUD **„Bramki: X / 6"** (na okrążenie). Wszystkie 6 = 🏵️ czysty przejazd + monety, nowe okrążenie.
+- **Farma zamknięta** — pełny płot dookoła, wjazd przez przeskok (jak każdy jumpable płot).
+- Guard: challenge liczenia nigdy nie spawnuje na torze (fallback przesuwa na wschód od areny).
+- Bez równań/resetu/utraty postępu. Odznaka 🏵️ = nagroda (do decyzji: nosić/półka/waluta).
