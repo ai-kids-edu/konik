@@ -235,6 +235,10 @@ Ordered so each step is useful alone and quietly prepares the next, without over
 - **P5 — infra when it pays:** three-mesh-bvh (fast rays for cam + collision) · gltf-transform pipeline ·
   instancing · Vite+ES-modules **iff** editing pain / addon needs justify it.
 - **P6 — polish:** interiors (Kenney furniture) · sound effects · credits (CC-BY attribution).
+- **P7 — math depth (anti-boredom for klasa 1):** the kids outgrew simple counting — add new
+  challenge *types* (missing addend, comparisons, money/change, patterns, number line, shapes, clock),
+  not just bigger numbers. Full brainstorm + priorities + first builds in `GAMEPLAY-IDEAS.md`. Enabler:
+  make a challenge data/typed (`challenge.type`) so new kinds drop in cleanly.
 
 ---
 
