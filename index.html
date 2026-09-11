@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 41, label: 'Płynniejsza minimapa' };
+const GAME_VERSION = { number: 42, label: 'Wydajność: cienie + zapis' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -879,6 +879,11 @@ function initScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.0 : 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  // The sun follows the horse, so the shadow map would otherwise re-render the
+  // whole scene EVERY frame (a second full draw-call pass). Update it manually a
+  // few times a second instead — the biggest Windows/Chrome win.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   // Bright, warm tone mapping
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.8;
@@ -6941,9 +6946,10 @@ function update() {
 
   // Challenge management
   challengeCooldown -= dt;
-  if (challenges.filter(c => c.active).length < 3 && challengeCooldown <= 0) {
-    createChallenge();
-    challengeCooldown = 2;
+  if (challengeCooldown <= 0) {
+    let activeCount = 0;
+    for (const c of challenges) if (c.active) activeCount++;
+    if (activeCount < 3) { createChallenge(); challengeCooldown = 2; }
   }
 
   // Check proximity to challenges
@@ -7112,11 +7118,15 @@ function update() {
   window.__minimapFrame = (window.__minimapFrame || 0) + 1;
   if (window.__minimapFrame % 3 === 0) drawMinimap();
 
-  // Shadow camera follows horse so small shadow map covers the action
-  if (sun) {
+  // Shadow camera follows horse so the small shadow map covers the action. Move
+  // the light and re-render the shadow map together only every 4th frame (~15 Hz)
+  // instead of every frame — cuts the shadow draw-call pass ~75%.
+  window.__shadowFrame = (window.__shadowFrame || 0) + 1;
+  if (sun && window.__shadowFrame % 4 === 0) {
     sun.position.set(horsePos.x + 30, 40, horsePos.z + 20);
     sun.target.position.set(horsePos.x, 0, horsePos.z);
     sun.target.updateMatrixWorld();
+    renderer.shadowMap.needsUpdate = true;
   }
 
   renderer.render(scene, camera);
@@ -7612,8 +7622,14 @@ window.startGame = async function () {
   // Assign initial passenger delivery quests to townspeople
   if (farmers.length > 0) assignNewPassengerQuest();
 
-  // Save state periodically
-  setInterval(saveState, 500);
+  // Save state periodically. localStorage.setItem is a synchronous, disk-backed
+  // write (spikier on Windows/Chrome) — doing it twice a second caused a regular
+  // micro-hitch. Every few seconds is plenty, and skip it while the tab is hidden.
+  setInterval(() => { if (!document.hidden) saveState(); }, 4000);
+  // Flush immediately when the tab is hidden or closed, so the longer interval
+  // never loses a freshly-earned level (more reliable than beforeunload on mobile).
+  window.addEventListener('pagehide', saveState);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveState(); });
 
   update();
 };
