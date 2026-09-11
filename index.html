@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 34, label: 'Kokarda na grzywie' };
+const GAME_VERSION = { number: 35, label: 'Trzy maści' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1635,7 +1635,6 @@ let coatWhiteImg = null;   // the loaded skin image; drawn in paintCoat
 // the intro picker AND the salon colour-change. name/chip drive the picker UI.
 const COAT_SKINS = [
   { key: 'white',  name: 'Biały',  chip: '#efe9dd' },
-  { key: 'siwy',   name: 'Siwy',   chip: '#c9ccd1' },
   { key: 'gniady', name: 'Gniady', chip: '#6d3f24' },
   { key: 'bulany', name: 'Bułany', chip: '#c9a86a' },
 ];
