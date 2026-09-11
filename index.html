@@ -70,8 +70,13 @@ body.compact #question-bar {
   background: linear-gradient(170deg, #87CEEB 0%, #a8e6ff 25%, #90d48a 50%, #5aad3a 75%, #3a7a25 100%);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   z-index: 100; color: #fff; text-align: center; padding: 20px;
-  overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif;
+  overflow-x: hidden; overflow-y: auto; font-family: 'Segoe UI', Tahoma, sans-serif;
 }
+/* Auto margins on the first/last in-flow items centre the block when there's
+   room, but collapse when the content is taller than the screen — so nothing is
+   clipped and the GRAJ button is always reachable (mobile had no way to start). */
+#intro .horse-emoji { margin-top: auto; }
+#intro button { margin-bottom: auto; }
 #intro::before {
   content: ''; position: absolute; inset: 0;
   background:
@@ -126,6 +131,19 @@ body.compact #question-bar {
 }
 #intro button:hover { transform: scale(1.08); box-shadow: 0 8px 35px rgba(255,100,50,0.6); }
 #intro button:active { transform: scale(0.95); }
+/* Short viewports (landscape tablets/phones): shrink so the whole intro —
+   including the coat picker and GRAJ — fits without needing to scroll. */
+@media (max-height: 780px) {
+  #intro .horse-emoji { font-size: 66px; margin-bottom: 2px; }
+  #intro h1 { font-size: 38px; margin-bottom: 4px; letter-spacing: 1px; }
+  #intro h2 { font-size: 16px; margin-bottom: 12px; }
+  #intro .instructions { font-size: 15px; line-height: 1.55; padding: 12px 22px; margin-bottom: 14px; }
+  #coat-picker { margin: 6px 0 2px; }
+  #coat-picker .cp-label { font-size: 16px; margin-bottom: 5px; }
+  #coat-picker .cp-chip { width: 34px; height: 34px; }
+  #coat-picker .cp-name { font-size: 13px; }
+  #intro button { padding: 15px 52px; font-size: 26px; }
+}
 
 /* Floating joystick: the whole lower-left of the screen is the active zone, so a
    child never has to aim for a small circle — the stick appears wherever they
@@ -391,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 39, label: 'Mocniejszy połysk' };
+const GAME_VERSION = { number: 40, label: 'Mobile intro fix 🏇' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
