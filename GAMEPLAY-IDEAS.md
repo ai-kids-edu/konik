@@ -262,3 +262,9 @@ transport (load≠deliver), `challenge.type`.
 - **Cue dla nieczytających:** bujająca strzałka nad następnym płotkiem + pulsujący płotek; miss-popup z ikoną ⤴️.
 - Flagi bramy + poprawny znak wjazdu; wyzwania-bramki wykluczone z footprintu.
 - **Otwarte:** pełny reset po zrzucie (miss teraz rzadki, ale rozważyć zachowanie postępu); płot farmy nadal bez kolizji (brak bramy — decyzja właściciela).
+
+### v24 — płoty blokują + przeskok
+Ogólny **przeskok płotów**: `barnColliders` z flagą `jumpable` są pomijane, gdy koń jest w locie
+i wysoko (`_barnBlocked`). Budynki NIE jumpable. Płot **farmy** dostał kolizję (20 segmentów) z
+**bramą** od strony drogi (+X). Arena: płot też jumpable (można wyskoczyć). Mobile skok = przycisk ⤴️
+(zawsze na dole prawego stosu). Zweryfikowane statycznie: 8 solid budynków + 25 jumpable płotów.

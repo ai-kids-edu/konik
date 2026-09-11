@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 37, label: 'Hipodrom XL + kolizje 🏇' };
+const GAME_VERSION = { number: 38, label: 'Płoty blokują + przeskok 🏇' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2631,6 +2631,7 @@ function buildHippodrome() {
     barnColliders.push({
       minX: Math.min(x1, x2) - 0.4, maxX: Math.max(x1, x2) + 0.4,
       minZ: Math.min(z1, z2) - 0.4, maxZ: Math.max(z1, z2) + 0.4,
+      jumpable: true,
     });
   };
   fenceRun(xW, zSouth, xE, zSouth);                 // south (finish) — solid
@@ -4917,27 +4918,32 @@ function createFarm() {
   // Use simple geometry fence posts + rails instead (looks better and consistent)
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xb08040, roughness: 0.8 });
   const postCount = 24;
+  // Gate: leave a gap in the ring on the side facing the road/spawn (+X) so the
+  // kid can ride straight in. Elsewhere the fence is solid — but jumpable.
+  const GATE_ANGLE = 0, GATE_HALF = 0.42; // radians of arc kept open
+  const inGate = (a) => Math.abs(Math.atan2(Math.sin(a - GATE_ANGLE), Math.cos(a - GATE_ANGLE))) < GATE_HALF;
   for (let i = 0; i < postCount; i++) {
     const angle = (i / postCount) * Math.PI * 2;
     const px = fx + Math.cos(angle) * FARM_RADIUS;
     const pz = fz + Math.sin(angle) * FARM_RADIUS;
     const ph = getTerrainHeight(px, pz);
-    // Fence post
+    const nextAngle = ((i + 1) / postCount) * Math.PI * 2;
+    const nx = fx + Math.cos(nextAngle) * FARM_RADIUS;
+    const nz = fz + Math.sin(nextAngle) * FARM_RADIUS;
+    const nh = getTerrainHeight(nx, nz);
+    // Skip the whole segment (post + rails + collider) inside the gate arc.
+    const segMidAngle = (angle + nextAngle) / 2;
+    if (inGate(angle) || inGate(segMidAngle)) continue;
+
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 6), fenceMat);
     post.position.set(px, ph + 0.6, pz);
     post.castShadow = false;
     scene.add(post);
 
-    // Horizontal rails to next post
-    const nextAngle = ((i + 1) / postCount) * Math.PI * 2;
-    const nx = fx + Math.cos(nextAngle) * FARM_RADIUS;
-    const nz = fz + Math.sin(nextAngle) * FARM_RADIUS;
-    const nh = getTerrainHeight(nx, nz);
     const midX = (px + nx) / 2, midZ = (pz + nz) / 2;
     const midH = (ph + nh) / 2;
     const dist = Math.sqrt((nx - px) ** 2 + (nz - pz) ** 2);
     const railAngle = Math.atan2(nz - pz, nx - px);
-
     for (const ry of [0.4, 0.8]) {
       const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, dist, 4), fenceMat);
       rail.position.set(midX, midH + ry, midZ);
@@ -4945,6 +4951,12 @@ function createFarm() {
       rail.rotation.y = -railAngle;
       scene.add(rail);
     }
+    // Solid (jumpable) collider hugging this segment.
+    barnColliders.push({
+      minX: Math.min(px, nx) - 0.25, maxX: Math.max(px, nx) + 0.25,
+      minZ: Math.min(pz, nz) - 0.25, maxZ: Math.max(pz, nz) + 0.25,
+      jumpable: true,
+    });
   }
 
   // === STABLE from GLB model ===
@@ -6787,7 +6799,12 @@ const HorseMotion = {
   _barnBlocked(x, z) {
     const r = HORSE_RADIUS;
     for (const c of barnColliders) {
-      if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) return true;
+      if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) {
+        // Low fences can be JUMPED: skip the collider while the horse is airborne
+        // and high enough to clear the rail. Buildings aren't jumpable.
+        if (c.jumpable && isJumping && horsePos.y - getTerrainHeight(horsePos.x, horsePos.z) > 0.6) continue;
+        return true;
+      }
     }
     return false;
   },
