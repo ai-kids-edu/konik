@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 45, label: 'Wydajność: daleki LOD' };
+const GAME_VERSION = { number: 46, label: 'Cofnięty throttle cienia' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -880,11 +880,6 @@ function initScene() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.0 : 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
-  // The sun follows the horse, so the shadow map would otherwise re-render the
-  // whole scene EVERY frame (a second full draw-call pass). Update it manually a
-  // few times a second instead — the biggest Windows/Chrome win.
-  renderer.shadowMap.autoUpdate = false;
-  renderer.shadowMap.needsUpdate = true;
   // Bright, warm tone mapping
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.8;
@@ -7147,15 +7142,11 @@ function update() {
   window.__minimapFrame = (window.__minimapFrame || 0) + 1;
   if (window.__minimapFrame % 3 === 0) drawMinimap();
 
-  // Shadow camera follows horse so the small shadow map covers the action. Move
-  // the light and re-render the shadow map together only every 4th frame (~15 Hz)
-  // instead of every frame — cuts the shadow draw-call pass ~75%.
-  window.__shadowFrame = (window.__shadowFrame || 0) + 1;
-  if (sun && window.__shadowFrame % 4 === 0) {
+  // Shadow camera follows horse so the small shadow map covers the action.
+  if (sun) {
     sun.position.set(horsePos.x + 30, 40, horsePos.z + 20);
     sun.target.position.set(horsePos.x, 0, horsePos.z);
     sun.target.updateMatrixWorld();
-    renderer.shadowMap.needsUpdate = true;
   }
 
   renderer.render(scene, camera);
