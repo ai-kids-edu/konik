@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 42, label: 'Wydajność: cienie + zapis' };
+const GAME_VERSION = { number: 43, label: 'Czytelny start hipodromu 🏇' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2737,6 +2737,12 @@ function buildHippodrome() {
   const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), new THREE.MeshStandardMaterial({ color: 0x4dc94d, side: THREE.DoubleSide, emissive: 0x2a7a2a, emissiveIntensity: 0.3 }));
   cloth.position.set(0, 2.0, 0.45); flag.add(cloth);
   flag.add(_hippoStartTag());
+  // "You already have N" board on the flag (dots + numeral), refreshed each round.
+  const startBoard = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.9),
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true }));
+  startBoard.position.set(0, 1.15, 0.06);
+  flag.add(startBoard);
+  H.startBoard = startBoard;
   scene.add(flag);
   H.startFlag = flag;
 
@@ -2801,15 +2807,11 @@ function hippoNewRound() {
 
   for (const h of H.hurdles) {
     if (h.slot <= H.addend) {
-      // already-done: rail lowered to the ground, greyed, ride straight over.
+      // Already counted — hidden so the lane before the start flag stays clean.
+      // The "you already have N" count lives on the start flag + HUD instead of
+      // as flattened rails with floating number cards (which read as litter).
       h.state = 'done'; h.cleared = true;
-      h.group.visible = true;
-      h.rail.rotation.x = 0;
-      h.rail.position.y = 0.12;
-      h.rail.material.color.set(0x9a938a);
-      h.rail.material.emissive.set(0x000000);
-      h.plaque.material.map = _hippoNumberCanvas(h.slot, '#9a938a', '#5a544c');
-      h.plaque.material.needsUpdate = true;
+      h.group.visible = false;
     } else if (h.slot <= H.target) {
       h.state = 'live'; h.cleared = false;
       h.group.visible = true;
@@ -2828,6 +2830,8 @@ function hippoNewRound() {
   const flagX = H.laneX - 3, flagZ = H.slotZ(H.addend) + 2.4;
   H._startZ = flagZ; // arm exactly where the flag is drawn
   H.startFlag.position.set(flagX, getTerrainHeight(flagX, flagZ), flagZ);
+  H.startBoard.material.map = _hippoNumberCanvas(H.addend, '#dff5df', '#2a7a2a'); // "you have N"
+  H.startBoard.material.needsUpdate = true;
   const bannerZ = H.slotZ(H.target);
   H.banner.position.set(H.laneX, getTerrainHeight(H.laneX, bannerZ), bannerZ);
   H.bannerBoard.material.map = _hippoNumberCanvas(H.target, '#ffe7f3', '#a01e5a');
