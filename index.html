@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 14, label: 'Tempo' };
+const GAME_VERSION = { number: 15, label: 'Fryzjer 2.0' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -1580,62 +1580,73 @@ const GROOM_MAX_LEVEL = 3;
 const RAINBOW_COLORS = [0xff3b30, 0xff9500, 0xffd60a, 0x34c759, 0x0a84ff, 0x5e5ce6, 0xbf5af2];
 
 let groomAccessories = null;
+let horseCoatMats = [];
+let horseHairMats = [];
+const hairOrigMaps = new Map();
+let coatColor = 0xffffff; // default white; the salon can recolour later
+let _coatCanvas = null, _coatTex = null, _hairCanvas = null, _hairTex = null;
+
 function ensureGroomAccessories() {
   if (groomAccessories || !horseGroup) return groomAccessories;
   const bow = buildGroomBow();
   bow.visible = false;
   horseGroup.add(bow);
-  const rainbow = buildGroomRainbow();
-  rainbow.visible = false;
-  horseGroup.add(rainbow);
-  const mud = buildMudSplatter();
-  mud.visible = false;
-  horseGroup.add(mud);
-  groomAccessories = { bow, rainbow, mud };
+  groomAccessories = { bow };
   return groomAccessories;
 }
 
-// The horse's whole appearance in one place. Mud is added ON TOP of the current
-// makeover (the horse keeps how it looked, just muddy); only washing — which
-// sets groomLevel back to 0 — takes the makeover off along with the mud.
-// Makeover stages: 1 = glossy tinted coat, 2 = bow on the mane, 3 = rainbow mane
-// + tail, each keeping the ones below it.
-function refreshHorseLook() {
-  if (!horse) return;
-  const gloss = Math.min(0.32, 0.11 * groomLevel);
-  horse.traverse(child => {
-    if (!child.isMesh || !child.material) return;
-    const mats = Array.isArray(child.material) ? child.material : [child.material];
-    mats.forEach(m => {
-      if ('roughness' in m) {
-        const base = m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85;
-        m.roughness = Math.max(0.25, base - 0.16 * groomLevel);
-      }
-      if (m.emissive) { m.emissive.setHex(0xffd9ec); m.emissiveIntensity = gloss; }
-    });
-  });
-  const acc = ensureGroomAccessories();
-  if (acc) {
-    acc.bow.visible = groomLevel >= 2;
-    acc.rainbow.visible = groomLevel >= 3;
-    acc.mud.visible = isDirty;
+// Paint the coat texture: a flat coat colour, with mud splats stamped on when
+// dirty. The model is UV-mapped, so this rides the body and deforms with the
+// animation — no floating blobs.
+function paintCoat() {
+  if (!horseCoatMats.length) return;
+  if (!_coatCanvas) { _coatCanvas = document.createElement('canvas'); _coatCanvas.width = _coatCanvas.height = 256; }
+  const ctx = _coatCanvas.getContext('2d');
+  ctx.fillStyle = '#' + coatColor.toString(16).padStart(6, '0');
+  ctx.fillRect(0, 0, 256, 256);
+  if (isDirty) {
+    for (let i = 0; i < 80; i++) {
+      const x = Math.random() * 256, y = Math.random() * 256, r = 4 + Math.random() * 16;
+      ctx.fillStyle = `rgba(${70 + (Math.random() * 30 | 0)},${45 + (Math.random() * 25 | 0)},${20 + (Math.random() * 15 | 0)},${(0.5 + Math.random() * 0.4).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
   }
+  if (!_coatTex) { _coatTex = new THREE.CanvasTexture(_coatCanvas); _coatTex.colorSpace = THREE.SRGBColorSpace; }
+  else _coatTex.needsUpdate = true;
+  for (const m of horseCoatMats) { m.map = _coatTex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
 }
 
-function buildMudSplatter() {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x5a3a1c, roughness: 1.0 });
-  const blobs = [
-    [0.0, 1.55, -0.2, 0.34], [0.28, 1.35, 0.15, 0.26], [-0.26, 1.3, 0.1, 0.24],
-    [0.1, 1.12, -0.6, 0.22], [-0.15, 1.7, 0.35, 0.2], [0.05, 1.0, 0.45, 0.2],
-  ];
-  for (const [bx, by, bz, r] of blobs) {
-    const blob = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), mat);
-    blob.position.set(bx, by, bz);
-    blob.scale.set(1, 0.6, 1);
-    g.add(blob);
+// Stage 3: rainbow mane + tail, painted onto the shared Hair material.
+function paintHairRainbow() {
+  if (!horseHairMats.length) return;
+  if (!_hairCanvas) { _hairCanvas = document.createElement('canvas'); _hairCanvas.width = 16; _hairCanvas.height = 128; }
+  const ctx = _hairCanvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 128);
+  ['#ff3b30', '#ff9500', '#ffd60a', '#34c759', '#0a84ff', '#5e5ce6', '#bf5af2']
+    .forEach((c, i, a) => grad.addColorStop(i / (a.length - 1), c));
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, 16, 128);
+  if (!_hairTex) { _hairTex = new THREE.CanvasTexture(_hairCanvas); _hairTex.colorSpace = THREE.SRGBColorSpace; }
+  for (const m of horseHairMats) { m.map = _hairTex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
+}
+function restoreHair() {
+  for (const m of horseHairMats) { m.map = hairOrigMaps.get(m) || null; m.needsUpdate = true; }
+}
+
+// The horse's whole appearance in one place. Mud rides on top of the makeover
+// (painted into the coat) and is removed only by washing (which also resets
+// groomLevel). Stages: 1 = glossy coat, 2 = bow on the mane, 3 = rainbow mane+tail.
+function refreshHorseLook() {
+  if (!horse) return;
+  paintCoat();
+  const gloss = Math.min(0.32, 0.11 * groomLevel);
+  for (const m of horseCoatMats) {
+    if (m.emissive) { m.emissive.setHex(0xffd9ec); m.emissiveIntensity = gloss; }
+    if ('roughness' in m) m.roughness = Math.max(0.25, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.16 * groomLevel);
+    m.needsUpdate = true;
   }
-  return g;
+  if (groomLevel >= 3) paintHairRainbow(); else restoreHair();
+  const acc = ensureGroomAccessories();
+  if (acc) acc.bow.visible = groomLevel >= 2;
 }
 
 // A big wallow puddle out in the field. Ride the horse into it to get muddy;
@@ -1674,25 +1685,9 @@ function buildGroomBow() {
     loop.rotation.z = s * Math.PI / 2;
     bow.add(loop);
   }
-  bow.position.set(0, 1.98, 0.36);
+  bow.scale.setScalar(1.4);
+  bow.position.set(0, 1.85, 0.5); // on the neck of the new model; tune if needed
   return bow;
-}
-
-function buildGroomRainbow() {
-  const g = new THREE.Group();
-  RAINBOW_COLORS.forEach((color, i) => {
-    const strandMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4, roughness: 0.5 });
-    const t = i / (RAINBOW_COLORS.length - 1);
-    const crest = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.1), strandMat);
-    crest.position.set(0, 2.35 - t * 0.7, 0.75 - t * 0.55);
-    crest.rotation.x = -0.5;
-    g.add(crest);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.62, 0.05), strandMat);
-    tail.position.set((i - 3) * 0.045, 1.05, -1.0);
-    tail.rotation.x = 0.55;
-    g.add(tail);
-  });
-  return g;
 }
 
 function activeGroomZone() {
@@ -5024,7 +5019,12 @@ function createHorse() {
         ? child.material.map(m => m.clone())
         : child.material.clone();
       const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.forEach(m => { if ('roughness' in m) m.userData.baseRoughness = m.roughness; });
+      mats.forEach(m => {
+        if ('roughness' in m) m.userData.baseRoughness = m.roughness;
+        const mn = (m.name || '').toLowerCase();
+        if (mn === 'horse') horseCoatMats.push(m);          // body coat — paintable
+        else if (mn === 'hair') { horseHairMats.push(m); hairOrigMaps.set(m, m.map || null); }
+      });
       const tag = (child.name + ' ' + (child.material.name || '')).toLowerCase();
       if (!SHOW_SADDLE && (tag.includes('saddle') || tag.includes('bridle'))) child.visible = false;
     });
