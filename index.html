@@ -64,6 +64,10 @@ canvas { display: block; }
 body.compact #question-bar {
   transform: translateX(-50%) scale(0.72); transform-origin: top center;
 }
+/* 14" non-touch laptops: shrink the overlay boxes a step so they don't swallow
+   the smaller screen (16" stays full). See applyLaptopUiTier. */
+body.ui-medium #hud { zoom: 0.82; }
+body.ui-medium #question-bar { transform: translateX(-50%) scale(0.82); transform-origin: top center; }
 
 #intro {
   position: fixed; inset: 0;
@@ -409,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 57, label: 'Tor niebieski + brama mety 🏁' };
+const GAME_VERSION = { number: 58, label: 'UI mniejsze na 14" laptopach' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -649,6 +653,14 @@ let compactUI = false;
 // on 14" laptops (medium) and more on phones (compact) so they don't swallow the
 // view. 1 = full (>=1000px min dim), 0.82 = medium (14"), 0.6 = compact/phone.
 let uiScale = 1;
+// Non-touch laptops: pick a UI tier from the shorter viewport edge. 16" (~1027px)
+// stays full; 14" (~890px) drops to medium. Re-run on resize.
+function applyLaptopUiTier() {
+  const minDim = Math.min(window.innerWidth, window.innerHeight);
+  const medium = minDim < 1010;
+  uiScale = medium ? 0.82 : 1;
+  document.body.classList.toggle('ui-medium', medium);
+}
 
 // Tree positions (for collision avoidance)
 let treePositions = [];
@@ -1492,8 +1504,8 @@ function updateInteractionPrompt(activeZone) {
     sellPromptEl = document.createElement('div');
     // On small screens the box is scaled down (and anchored to its top) so it
     // stops covering the play area; the action button already shows what to do.
-    const scaleTf = compactUI
-      ? 'transform:translateX(-50%) scale(0.6);transform-origin:top center;'
+    const scaleTf = uiScale < 1
+      ? `transform:translateX(-50%) scale(${uiScale});transform-origin:top center;`
       : 'transform:translateX(-50%);';
     sellPromptEl.style.cssText = 'position:absolute;top:8%;left:50%;' + scaleTf
       + 'background:rgba(0,0,0,0.72);color:#fff;padding:24px 40px;border-radius:24px;'
@@ -1996,7 +2008,7 @@ function showTransientPopup(key, opts, html) {
   const { el } = entry;
   // On small screens these feedback bubbles were laptop-sized and blanketed the
   // view — shrink them so they read as a quick "+1" toast, not a full banner.
-  const f = compactUI ? 0.6 : 1;
+  const f = uiScale;
   el.innerHTML = html;
   el.style.opacity = '1';
   el.style.transform = `translate(-50%,-50%) scale(${popScale * f})`;
@@ -6253,14 +6265,20 @@ function initInput() {
     // viewport edge so it's orientation-independent; ~900px keeps 10" tablets
     // compact but leaves 12.9" tablets at full size.
     compactUI = Math.min(window.innerWidth, window.innerHeight) < 900;
+    uiScale = compactUI ? 0.6 : 1;
     if (compactUI) document.body.classList.add('compact');
     initJoystick();
+  } else {
+    // Non-touch laptops/desktops: the boxes are sized for a 16" screen and overflow
+    // a 14". Shrink a step when the shorter viewport edge is small.
+    applyLaptopUiTier();
   }
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (!isMobile) applyLaptopUiTier();
   });
 
   // Show pause overlay when window loses focus
