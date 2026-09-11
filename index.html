@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 63, label: 'Szyld Siodlarnia' };
+const GAME_VERSION = { number: 64, label: 'Siodlarnia na minimapie' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -6811,6 +6811,16 @@ function buildMinimapStatic(ctx, W, H, R, toMap) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // Saddlery marker (helps find where to buy the saddle) — a small dark-brown
+  // square with a gold dot, at the stall's fixed position by the stable.
+  {
+    const sp = toMap(FARM_X - 10, FARM_Z + 10);
+    ctx.fillStyle = '#5a3a1c';
+    ctx.fillRect(sp.x - 3, sp.y - 3, 6, 6);
+    ctx.fillStyle = '#ffd766';
+    ctx.beginPath(); ctx.arc(sp.x, sp.y, 1.6, 0, Math.PI * 2); ctx.fill();
   }
 
   ctx.restore(); // end static clip
