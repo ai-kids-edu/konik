@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 61, label: 'Arena krótsza 🏁' };
+const GAME_VERSION = { number: 62, label: 'Siodlarnia: kup siodło' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -588,6 +588,8 @@ function createAnimatedClone(key, scale = 1) {
 let scene, camera, renderer, sun;
 let horse, horseGroup;
 let SHOW_SADDLE = false;    // toggle: hide the saddle/bridle for a bare horse
+let saddleMeshes = [];      // the model's saddle meshes; shown once a saddle is bought
+function applySaddle() { const on = (inventory.siodlo || 0) > 0; for (const m of saddleMeshes) m.visible = on; }
 const HORSE_MODEL_YAW = 0;  // facing offset so the model points along +Z (tune per model)
 let clock = new THREE.Clock();
 let carrots = 0;
@@ -609,15 +611,16 @@ const SHOP_ITEMS = {
   list:    { emoji: '💌', name: 'List',    key: 'KeyL', keyLabel: 'L', price: 0,  max: 1,        building: 'poczta' },
   podkowa: { emoji: '🧲', name: 'Podkowa', key: 'KeyP', keyLabel: 'P', price: 8, max: Infinity, building: 'kowal' },
   fajerwerki: { emoji: '🎇', name: 'Fajerwerki', key: 'KeyF', keyLabel: 'F', price: 5, max: Infinity, building: 'stragan' },
+  siodlo:  { emoji: '🐎', name: 'Siodło',  key: 'KeyR', keyLabel: 'R', price: 25, max: 1, building: 'siodlarnia' },
 };
-let inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0 };
+let inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, siodlo: 0 };
 
 // Economy — the single place that answers "can this shop item be bought?".
 // hasRoom and canAfford are split out so a prompt can explain WHY a purchase is
 // blocked (already owned vs too few coins); canBuy is the combined predicate the
 // zone-beacon cue and attemptBuyItem share instead of re-deriving it each.
 const Economy = {
-  hasRoom(itemKey) { const it = SHOP_ITEMS[itemKey]; return !!it && inventory[itemKey] < it.max; },
+  hasRoom(itemKey) { const it = SHOP_ITEMS[itemKey]; return !!it && (inventory[itemKey] || 0) < it.max; },
   canAfford(itemKey) { const it = SHOP_ITEMS[itemKey]; return !!it && money >= it.price; },
   canBuy(itemKey) { return this.hasRoom(itemKey) && this.canAfford(itemKey); },
 };
@@ -2354,9 +2357,10 @@ function attemptBuyItem(itemKey) {
   if (buyCooldown > 0) return;
   if (!Economy.canBuy(itemKey)) return;
   money -= it.price;
-  inventory[itemKey] += 1;
+  inventory[itemKey] = (inventory[itemKey] || 0) + 1;
   buyCooldown = 0.25;
   zone.justBought = true; // sticky flag until horse leaves the zone
+  if (itemKey === 'siodlo') applySaddle(); // put the saddle on the horse now
   updateCarrotHUD();
   showBuyPopup(itemKey);
   spawnCoinBurst(zone.counterX, zone.counterZ, 4);
@@ -3997,6 +4001,21 @@ function buildBuyCounterDisplay(itemKey) {
     shoe.rotation.x = -Math.PI / 2;
     shoe.position.y = 0.05;
     g.add(shoe);
+  } else if (itemKey === 'siodlo') {
+    // Small saddle: a rounded brown seat with a front pommel bump.
+    const seat = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x6a3d1c, roughness: 0.6 })
+    );
+    seat.scale.set(1, 0.55, 1.3);
+    seat.position.y = 0.12;
+    g.add(seat);
+    const pommel = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0x502a12, roughness: 0.6 })
+    );
+    pommel.position.set(0, 0.18, -0.22);
+    g.add(pommel);
   } else if (itemKey === 'fajerwerki') {
     // Small rocket display: cone tip on a stubby cylinder body
     const body = new THREE.Mesh(
@@ -5272,6 +5291,9 @@ function createFarm() {
     beacon: szBeacon, kind: 'stable', inZone: false,
   });
 
+  // Saddlery (siodlarnia): a small stall by the stable selling the saddle.
+  buildTradingStand(fx - 10, fz + 10, 'siodlo');
+
   // Water trough (simple geometry — no GLB for this)
   const troughX = fx - 5, troughZ = fz + 2;
   const troughH = getTerrainHeight(troughX, troughZ);
@@ -5832,7 +5854,8 @@ function createHorse() {
         } else if (mn === 'hair') { horseHairMats.push(m); hairOrigMaps.set(m, m.map || null); }
       });
       const tag = (child.name + ' ' + (child.material.name || '')).toLowerCase();
-      if (!SHOW_SADDLE && (tag.includes('saddle') || tag.includes('bridle'))) child.visible = false;
+      if (tag.includes('saddle')) { saddleMeshes.push(child); child.visible = SHOW_SADDLE; } // shown once a saddle is bought
+      else if (!SHOW_SADDLE && tag.includes('bridle')) child.visible = false;
     });
 
     // Clip names differ per model (this one prefixes "Skeleton|"), so alias the
@@ -5868,6 +5891,7 @@ function createHorse() {
   refreshHorseLook();
   loadCoatSkin(); // async: swaps in the purpose-made white skin if present
   loadGroomedSkin(); // async: the freshly-groomed skin, shown from groom stage 1
+  applySaddle(); // show the saddle if one was already bought (restored save)
 }
 
 // ========== CHALLENGES ==========
