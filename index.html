@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 46, label: 'Cofnięty throttle cienia' };
+const GAME_VERSION = { number: 47, label: 'Koń bez cienia' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -5650,8 +5650,8 @@ function createHorse() {
     horse = body;
   }
 
-  // Only horse casts shadow (other models don't, for performance)
-  horseGroup.traverse(c => { if (c.isMesh) c.castShadow = true; });
+  // Horse casts no shadow (its moving cast-shadow looked bad and jittered).
+  horseGroup.traverse(c => { if (c.isMesh) c.castShadow = false; });
   scene.add(horseGroup);
   refreshHorseLook();
   loadCoatSkin(); // async: swaps in the purpose-made white skin if present
