@@ -95,10 +95,24 @@ Quaternius):
   through the gltf-transform pipeline (§6.7: Draco/meshopt + KTX2) to cut it 50–80%. High priority.
 - **Scope:** player horse only; farm horses (`Horse_Q`/`Horse_White`) stay Quaternius for now.
 
-**The cheetah answer:** there is **no clean CC0 rigged+animated cheetah/leopard/tiger** — a real
-content gap, not a search miss. Stop reusing the scaled fox by dropping in the **CC-BY static
-Poly-by-Google Cheetah**; if it must move, retarget a Quaternius quadruped gallop clip onto it.
-(Animated Sketchfab cheetahs are paid-EULA or likely game-rips — reject.)
+**The cheetah / big-cat answer (updated after the Henry S follow-up research):**
+- **Henry S is a dead end for siblings** — the author has only two public models (our horse + a
+  static truck). No animal set to harvest.
+- **A consistent free *realistic* animal set is not achievable.** The one author who could supply one
+  (WildMesh 3D + siblings — lion/tiger/fox/deer/pig… 60–145 anims each) ships "free" as
+  personal-use-only (commercial requires a Fab/Patreon purchase) = paid-EULA in disguise → reject for
+  a public repo. Most other "realistic free" animals are game-rips (Google AR / GTA) — usable in
+  practice but not clean IP.
+- **No clean CC-BY *cheetah* exists** (a literal cheetah is a GTA rip). Best substitute big cats to
+  replace the scaled-fox: **vukhiemton "Realistic Lion"** (excellent rig — idle/walk/run/roar/sit,
+  lightest at ~9k tris, original — but its download is off-Sketchfab via Fab.com, **verify the free
+  tier allows redistribution** before use); fallback **MotionStreamStudios "White Tiger"** (clean
+  one-click CC-BY on Sketchfab, ~33k tris, but likely Google-AR-derived). ⚠️ The White Tiger page
+  carries a phishing "verify your account" comment in third-party content — ignore it.
+- **Direction:** keep the CC0 Quaternius farm animals (deer/dog/fox/donkey have no clean realistic
+  upgrade), treat the **Henry S horse as the sole realistic hero**, and add **at most one more
+  realistic hero — a big cat** for the "cheetah". A full realistic zoo also blows the tablet/Pages
+  budget (the horse alone is ~20MB), reinforcing "one or two heroes, stylized CC0 for the rest."
 
 **Attribution:** CC-BY items (hero horse, cheetah) need a credit line — add a `CREDITS.md` and an
 in-game credits blurb when we adopt them. All-Quaternius/Kenney = CC0 = no credit required.
