@@ -235,3 +235,22 @@ mostów z bel (długość/liczba) · gotowanie (ułamki, połowy) · zegar/termi
 6. **Salon: symetria/wzory** — nowy typ, poza arytmetyką.
 
 **Enabler techniczny:** zrobić z wyzwania **typ/dane** (`challenge.type`) — patrz `DESIGN-DIRECTION.md` P7.
+
+---
+
+## ✅ ZBUDOWANE — Hipodrom v1 (embodied "dopełnianie" 4+?=9)
+Filar 3 (tor przeszkód) wdrożony jako pierwsza nowa działka. Lokalizacja: puste zachodnie
+rubieże, `HIPPO.cx=-56, cz=-150` (ogrodzona arena, wjazd od strony drogi; marker na minimapie).
+
+**Mechanika = matematyka:** rząd numerowanych płotków = oś liczbowa. Płotki ≤ `addend` są już
+powalone (przejeżdżasz), a **żywe płotki `addend+1..target` SĄ odpowiedzią** — przeskocz każdy
+(E), licznik rośnie `addend → target`. Dojazd do `target` = wygrana (konfetti, monety, 🏵️ rozeta,
+`4 + 5 = 9`). Brak liczby do zgadnięcia: dziecko **wykonuje** liczenie ciałem (1 świadomy skok = +1)
+→ brute-proof. Bez kary: przejazd płotka po ziemi = delikatny reset próby.
+
+Koń jest ściągany do kłusu w arenie (`arenaSpeed`) żeby jeden skok = jeden płotek. Stan rundy:
+`addend 2..5`, `gap 2..4`, `target≤9`. Rozety trwałe (save). Debug: `?debug` → `window.__hippo`.
+
+**Do dopracowania później:** tuning okna detekcji skoku w live-play, sędzia-NPC/animacja wiwatu,
+warianty (co 2 / co 5), kamera slow-mo na finiszu. Następne filary: dopełnianie combine-to-feed,
+transport (load≠deliver), `challenge.type`.

@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 35, label: 'Trzy maści' };
+const GAME_VERSION = { number: 36, label: 'Hipodrom 🏇' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -570,6 +570,7 @@ let clock = new THREE.Clock();
 let carrots = 0;
 let applesCollected = 0;
 let money = 0;
+let rosettes = 0; // show-jumping trophies earned at the hipodrom
 const CARROT_PRICE = 1;
 const APPLE_PRICE = 2;
 let sellZone = null; // { minX, maxX, minZ, maxZ, cooldown, popup }
@@ -982,6 +983,8 @@ function initScene() {
   // South zones — Wild West outskirts & town
   createSouthlands();
   createWildWestTown();
+  buildHippodrome();
+  hippoBuilt = true;
   // Prairie trading stall (fajerwerki) — off to the side of the road
   buildTradingStand(45, -180);
 }
@@ -1303,9 +1306,10 @@ function createSouthlands() {
   for (let i = 0; i < 40; i++) {
     const x = (Math.random() - 0.5) * 160;
     const z = FARM_SOUTH_EDGE - 5 - Math.random() * (FARM_SOUTH_EDGE - CITY_SOUTH_EDGE - 20);
-    // Skip road corridor and side cliff zones
+    // Skip road corridor, side cliffs, and the hipodrom footprint
     if (Math.abs(x) < ROAD_HALF_WIDTH + 3) continue;
     if (Math.abs(x) > SIDE_EDGE - 5) continue;
+    if (inHippoFootprint(x, z, 4)) continue;
     const h = getTerrainHeight(x, z);
     if (h > 4) continue;
     const cactus = new THREE.Group();
@@ -1347,6 +1351,7 @@ function createSouthlands() {
     const z = FARM_SOUTH_EDGE - 5 - Math.random() * (FARM_SOUTH_EDGE - CITY_SOUTH_EDGE - 20);
     if (Math.abs(x) < ROAD_HALF_WIDTH + 2) continue;
     if (Math.abs(x) > SIDE_EDGE - 3) continue;
+    if (inHippoFootprint(x, z, 4)) continue;
     const h = getTerrainHeight(x, z);
     if (h > 4) continue;
     const size = 0.4 + Math.random() * 0.8;
@@ -2513,6 +2518,375 @@ function createWildWestTown() {
   createTownsperson(0, cz - 10, 0, 'kid');                       // middle of street
   createTownsperson(8, cz - 20, -Math.PI / 2, 'blacksmith');     // outside forge
   createTownsperson(-8, cz - 22, Math.PI / 2, 'banker');         // outside bank
+}
+
+// ===== HIPODROM: show-jumping arena — embodied "missing addend" (4 + ? = 9) =====
+// The kid gallops a lane of numbered hurdles. Faded hurdles (≤ the given addend)
+// are already knocked down: ride over them. The remaining live hurdles ARE the
+// answer — jump each one and the counter climbs from `addend` up to `target`.
+// Reaching the target hurdle wins. There is no wrong number to pick: the child
+// PERFORMS the count with their body (one deliberate jump = +1), which is exactly
+// what makes it brute-proof and what the unsure kid needs to feel.
+const HIPPO = {
+  cx: -56, cz: -150,          // arena centre (empty western outskirts)
+  halfX: 25, halfZ: 13,       // fence half-extents
+  laneZ: -150,                // lane centreline (runs along X)
+  slot1X: -40, spacing: 4.5,  // hurdle slot 1 (easternmost) and spacing westward
+  maxSlot: 9,                 // hurdles 1..9 = number line up to 9
+  arenaSpeed: 5.0,            // gentle speed cap inside the ring: one jump = one hurdle
+  hurdles: [],                // per-slot { slot, x, group, rail, plaque, state }
+  startFlag: null, banner: null, hud: null,
+  addend: 4, target: 9, counter: 4, armed: false, won: false,
+  _prevX: 0, _prevJump: false, _winTimer: 0,
+  slotX(i) { return this.slot1X - (i - 1) * this.spacing; },
+  contains(x, z) {
+    return x > this.cx - this.halfX && x < this.cx + this.halfX
+        && z > this.cz - this.halfZ && z < this.cz + this.halfZ;
+  },
+};
+
+// True if (x,z) is inside the arena footprint (plus `pad`) — keeps scattered
+// decorations (cacti, rocks) from spawning on the course. Hoisted so the earlier
+// createSouthlands() spawn loops can call it at world-build time.
+function inHippoFootprint(x, z, pad = 0) {
+  return x > HIPPO.cx - HIPPO.halfX - pad && x < HIPPO.cx + HIPPO.halfX + pad
+      && z > HIPPO.cz - HIPPO.halfZ - pad && z < HIPPO.cz + HIPPO.halfZ + pad;
+}
+
+// Canvas of `n` dots (kids read quantity before the numeral) with the numeral below.
+function _hippoNumberCanvas(n, bg, fg) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 160;
+  const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, 128, 160);
+  g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 4; g.strokeRect(3, 3, 122, 154);
+  // dot grid (up to 3 cols)
+  g.fillStyle = fg;
+  const cols = Math.min(n, 3), rows = Math.ceil(n / 3);
+  const cellW = 34, cellH = 26, startY = 22;
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / 3), col = i % 3;
+    const rowCount = (r === rows - 1) ? (n - r * 3) : cols;
+    const rowW = rowCount * cellW;
+    const cx = 64 - rowW / 2 + col * cellW + cellW / 2;
+    const cy = startY + r * cellH;
+    g.beginPath(); g.arc(cx, cy, 10, 0, Math.PI * 2); g.fill();
+  }
+  g.font = 'bold 64px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(String(n), 64, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+function _hippoPlaque(n, live) {
+  const tex = _hippoNumberCanvas(n, live ? '#fff6df' : '#9a938a', live ? '#7a3b0a' : '#5a544c');
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.8, 1.0),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true })
+  );
+  return m;
+}
+
+function buildHippodrome() {
+  const H = HIPPO;
+  const group = new THREE.Group();
+  scene.add(group);
+
+  // Sand pad (visual only; horse still follows terrain height).
+  const padY = getTerrainHeight(H.cx, H.cz) + 0.03;
+  const pad = new THREE.Mesh(
+    new THREE.PlaneGeometry(H.halfX * 2, H.halfZ * 2),
+    new THREE.MeshStandardMaterial({ color: 0xdcc79a, roughness: 1.0 })
+  );
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(H.cx, padY, H.cz);
+  pad.receiveShadow = true;
+  group.add(pad);
+
+  // White post-and-rail fence, with an entrance gap on the east side (kid enters west-bound).
+  const fenceMat = _mat(0xf3ede0, 0.85);
+  const postMat = _mat(0xcdbfa6, 0.9);
+  const addFencePost = (x, z) => {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 1.5, 8), postMat);
+    p.position.set(x, getTerrainHeight(x, z) + 0.75, z);
+    p.castShadow = true; group.add(p);
+  };
+  const addRail = (x1, z1, x2, z2) => {
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    for (const ry of [0.55, 1.05]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.09, 0.09), fenceMat);
+      rail.position.set((x1 + x2) / 2, getTerrainHeight((x1 + x2) / 2, (z1 + z2) / 2) + ry, (z1 + z2) / 2);
+      rail.rotation.y = Math.atan2(z2 - z1, x2 - x1);
+      group.add(rail);
+    }
+  };
+  const xW = H.cx - H.halfX, xE = H.cx + H.halfX;
+  const zN = H.cz - H.halfZ, zS = H.cz + H.halfZ;
+  const gapHalf = 3.5; // entrance gap centred on the lane, east side
+  // North & south rails
+  for (const z of [zN, zS]) {
+    addRail(xW, z, xE, z);
+    for (let x = xW; x <= xE + 0.1; x += 4.5) addFencePost(x, z);
+  }
+  // West rail (solid)
+  addRail(xW, zN, xW, zS);
+  for (let z = zN; z <= zS + 0.1; z += 4.5) addFencePost(xW, z);
+  // East rail split around the entrance gap
+  addRail(xE, zN, xE, H.laneZ - gapHalf);
+  addRail(xE, H.laneZ + gapHalf, xE, zS);
+  for (let z = zN; z <= zS + 0.1; z += 4.5) {
+    if (Math.abs(z - H.laneZ) > gapHalf) addFencePost(xE, z);
+  }
+
+  // Entrance sign + glowing beacon so the kid spots the arena from the road.
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 256; signCanvas.height = 64;
+  const sc = signCanvas.getContext('2d');
+  sc.fillStyle = '#3a6b3a'; sc.fillRect(0, 0, 256, 64);
+  sc.fillStyle = '#fff'; sc.font = 'bold 34px Arial'; sc.textAlign = 'center'; sc.textBaseline = 'middle';
+  sc.fillText('HIPODROM 🏇', 128, 34);
+  const gate = new THREE.Mesh(
+    new THREE.PlaneGeometry(6, 1.5),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(signCanvas), side: THREE.DoubleSide })
+  );
+  gate.position.set(xE + 0.2, getTerrainHeight(xE, H.laneZ) + 3.2, H.laneZ);
+  gate.rotation.y = -Math.PI / 2;
+  group.add(gate);
+  const beacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x7dff7d, emissive: 0x4ddd4d, emissiveIntensity: 0.8, transparent: true, opacity: 0.85 })
+  );
+  beacon.position.set(xE + 0.2, getTerrainHeight(xE, H.laneZ) + 4.2, H.laneZ);
+  group.add(beacon);
+  H.beacon = beacon;
+
+  // Hurdles: one per slot, built once and re-posed each round.
+  const railMat = _mat(0xd94f6a, 0.7);   // live = bright red-pink
+  const standMat = _mat(0xf3ede0, 0.85);
+  for (let i = 1; i <= H.maxSlot; i++) {
+    const x = H.slotX(i);
+    const hg = new THREE.Group();
+    hg.position.set(x, getTerrainHeight(x, H.laneZ), H.laneZ);
+    for (const sz of [-1.4, 1.4]) {
+      const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8), standMat);
+      stand.position.set(0, 0.75, sz);
+      stand.castShadow = true; hg.add(stand);
+    }
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 3.0), railMat.clone());
+    rail.position.set(0, 1.0, 0);
+    rail.castShadow = true; hg.add(rail);
+    const plaque = _hippoPlaque(i, true);
+    plaque.position.set(0.6, 1.6, 0);
+    plaque.rotation.y = Math.PI / 2; // faces east (incoming kid)
+    hg.add(plaque);
+    group.add(hg);
+    H.hurdles.push({ slot: i, x, group: hg, rail, plaque, cleared: false, state: 'live' });
+  }
+
+  // Start flag (green, marks "you already have this many").
+  const flag = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 8), _mat(0x8a5a2a, 0.8));
+  pole.position.y = 1.2; flag.add(pole);
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), new THREE.MeshStandardMaterial({ color: 0x4dc94d, side: THREE.DoubleSide, emissive: 0x2a7a2a, emissiveIntensity: 0.3 }));
+  cloth.position.set(0.45, 2.0, 0); flag.add(cloth);
+  flag.add(_hippoStartTag());
+  scene.add(flag);
+  H.startFlag = flag;
+
+  // Target banner (big, with rosette) — the goal number.
+  const banner = new THREE.Group();
+  for (const bz of [-1.7, 1.7]) {
+    const bp = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 8), _mat(0x7a3b52, 0.8));
+    bp.position.set(0, 1.7, bz); banner.add(bp);
+  }
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.6), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true }));
+  board.position.set(0, 2.7, 0);
+  board.rotation.y = Math.PI / 2;
+  banner.add(board);
+  H.bannerBoard = board;
+  scene.add(banner);
+  H.banner = banner;
+
+  // Judge NPC near the west end, cheering the finish.
+  createTownsperson(xW + 2, H.cz - 6, -Math.PI / 4, 'sheriff');
+
+  // Running HUD (hidden until the kid arms the course by crossing the start flag).
+  const hud = document.createElement('div');
+  hud.id = 'hippo-hud';
+  hud.style.cssText = 'position:absolute;top:11%;left:50%;transform:translateX(-50%);'
+    + 'background:rgba(30,60,30,0.82);color:#fff;padding:14px 30px;border-radius:22px;'
+    + 'font-family:"Segoe UI",Tahoma,sans-serif;font-weight:900;z-index:150;text-align:center;'
+    + 'border:4px solid rgba(180,255,150,0.9);box-shadow:0 8px 30px rgba(0,0,0,0.5);'
+    + 'pointer-events:none;opacity:0;transition:opacity 0.25s;';
+  document.body.appendChild(hud);
+  H.hud = hud;
+
+  hippoNewRound();
+
+  // Debug handle (only with ?debug) for scripted verification of the arena logic.
+  if (new URLSearchParams(location.search).has('debug')) {
+    window.__hippo = { HIPPO, newRound: hippoNewRound, win: hippoWin, reset: hippoResetAttempt };
+  }
+}
+
+// Small "START" tag under the green flag.
+function _hippoStartTag() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 48;
+  const g = c.getContext('2d');
+  g.fillStyle = '#2a7a2a'; g.fillRect(0, 0, 128, 48);
+  g.fillStyle = '#fff'; g.font = 'bold 30px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('START', 64, 26);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.34), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.DoubleSide, transparent: true }));
+  m.position.set(0, 0.5, 0);
+  m.rotation.y = Math.PI / 2;
+  return m;
+}
+
+// Pick a fresh 4+?=9 style problem and re-pose the hurdles / flag / banner.
+function hippoNewRound() {
+  const H = HIPPO;
+  H.addend = 2 + Math.floor(Math.random() * 4);      // 2..5
+  const gap = 2 + Math.floor(Math.random() * 3);      // 2..4
+  H.target = Math.min(H.addend + gap, H.maxSlot);
+  if (H.target <= H.addend) H.target = H.addend + 2;
+  H.counter = H.addend;
+  H.armed = false;
+  H.won = false;
+
+  for (const h of H.hurdles) {
+    if (h.slot <= H.addend) {
+      // already-done: rail lowered to the ground, greyed, ride straight over.
+      h.state = 'done'; h.cleared = true;
+      h.group.visible = true;
+      h.rail.rotation.z = Math.PI / 2 * 0.0;
+      h.rail.position.y = 0.12;
+      h.rail.material.color.set(0x9a938a);
+      h.rail.material.emissive.set(0x000000);
+      h.plaque.material.map = _hippoNumberCanvas(h.slot, '#9a938a', '#5a544c');
+      h.plaque.material.needsUpdate = true;
+    } else if (h.slot <= H.target) {
+      h.state = 'live'; h.cleared = false;
+      h.group.visible = true;
+      h.rail.position.y = 1.0;
+      h.rail.material.color.set(0xd94f6a);
+      h.rail.material.emissive.set(0x000000);
+      h.plaque.material.map = _hippoNumberCanvas(h.slot, '#fff6df', '#7a3b0a');
+      h.plaque.material.needsUpdate = true;
+    } else {
+      h.state = 'hidden';
+      h.group.visible = false;
+    }
+  }
+
+  H.startFlag.position.set(H.slotX(H.addend), getTerrainHeight(H.slotX(H.addend), H.laneZ), H.laneZ + 2.2);
+  H.banner.position.set(H.slotX(H.target), getTerrainHeight(H.slotX(H.target), H.laneZ), H.laneZ - 2.4);
+  H.bannerBoard.material.map = _hippoNumberCanvas(H.target, '#ffe7f3', '#a01e5a');
+  H.bannerBoard.material.needsUpdate = true;
+
+  hippoUpdateHUD(true);
+}
+
+function hippoUpdateHUD(preview) {
+  const H = HIPPO;
+  if (!H.hud) return;
+  const dots = [];
+  for (let i = 1; i <= H.target; i++) {
+    const filled = i <= H.counter;
+    dots.push(`<span style="display:inline-block;width:26px;height:26px;margin:0 3px;border-radius:50%;`
+      + (filled ? 'background:#ffd944;box-shadow:0 0 6px #ffd944;' : 'background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.5);')
+      + `"></span>`);
+  }
+  const head = preview
+    ? `Masz <span style="color:#8dff8d">${H.addend}</span> — doskocz do <span style="color:#ffd944">${H.target}</span>!`
+    : `<span style="color:#8dff8d">${H.addend}</span> + <span style="color:#ff9ecb">${H.counter - H.addend}</span> = <span style="color:#ffd944">${H.counter}</span>`;
+  H.hud.innerHTML = `<div style="font-size:30px;margin-bottom:8px">🏇 ${head}</div>`
+    + `<div style="line-height:1">${dots.join('')}</div>`;
+}
+
+function hippoWin() {
+  const H = HIPPO;
+  H.won = true;
+  const gap = H.target - H.addend;
+  const reward = 3 + gap;
+  money += reward;
+  rosettes += 1;
+  updateCarrotHUD();
+  spawnConfetti(horsePos);
+  spawnCoinBurst(horsePos.x, horsePos.z, 16);
+  showTransientPopup('hippo-win', { top: 30, fontSize: 46, pad: '22px 46px', radius: 26, duration: 2400, popScale: 1.15, transition: 0.3 },
+    `<div>🏵️ <b>BRAWO!</b> 🏵️</div>`
+    + `<div style="font-size:56px;margin-top:8px">${H.addend} + ${gap} = ${H.target}</div>`
+    + `<div style="font-size:34px;margin-top:8px">+${reward} 🪙</div>`);
+  H._winTimer = 2.8;
+}
+
+let hippoBuilt = false;
+function updateHippodrome(dt) {
+  const H = HIPPO;
+  if (!hippoBuilt) return;
+  H.beacon.material.emissiveIntensity = 0.5 + (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
+
+  if (H._winTimer > 0) {
+    H._winTimer -= dt;
+    if (H._winTimer <= 0) hippoNewRound();
+  }
+
+  const hx = horsePos.x, inside = H.contains(hx, horsePos.z);
+  if (!inside) {
+    if (H.hud.style.opacity !== '0') H.hud.style.opacity = '0';
+    if (H.armed && !H.won) { H.armed = false; hippoResetAttempt(); }
+    H._prevX = hx; H._prevJump = isJumping;
+    return;
+  }
+  H.hud.style.opacity = '1';
+
+  const startX = H.slotX(H.addend);
+  // Arm when the kid crosses the start flag heading west.
+  if (!H.armed && !H.won && H._prevX > startX && hx <= startX) {
+    H.armed = true; H.counter = H.addend; hippoUpdateHUD(false);
+  }
+
+  if (H.armed && !H.won) {
+    const expected = H.hurdles.find(h => h.state === 'live' && !h.cleared);
+    if (expected) {
+      const tookOff = isJumping && !H._prevJump; // rising edge of a jump
+      // Clear the expected hurdle if the jump is launched just before it.
+      if (tookOff && Math.abs(hx - expected.x) < 3.4) {
+        expected.cleared = true;
+        expected.rail.material.color.set(0x5ad15a);
+        expected.rail.material.emissive.set(0x2a7a2a);
+        expected.rail.material.emissiveIntensity = 0.6;
+        H.counter += 1;
+        hippoUpdateHUD(false);
+        spawnConfetti({ x: expected.x, y: getTerrainHeight(expected.x, H.laneZ) + 1.5, z: H.laneZ });
+        if (H.counter >= H.target) hippoWin();
+      } else if (!isJumping && H._prevX > expected.x && hx <= expected.x) {
+        // Rode through the live hurdle on the ground — knock it, gentle reset.
+        expected.rail.rotation.z = 0.5;
+        showTransientPopup('hippo-miss', { top: 30, fontSize: 40, pad: '18px 36px', radius: 22, duration: 1400, popScale: 1.1, transition: 0.3 },
+          `<div>🐴 Przeskocz płotki!</div><div style="font-size:28px;margin-top:6px">Naciśnij <b>E</b> na płotku</div>`);
+        hippoResetAttempt();
+      }
+    }
+  }
+
+  H._prevX = hx; H._prevJump = isJumping;
+}
+
+// Re-raise the live hurdles and restart the count at the addend (no punishment).
+function hippoResetAttempt() {
+  const H = HIPPO;
+  H.counter = H.addend;
+  for (const h of H.hurdles) {
+    if (h.state !== 'live') continue;
+    h.cleared = false;
+    h.rail.rotation.z = 0;
+    h.rail.position.y = 1.0;
+    h.rail.material.color.set(0xd94f6a);
+    h.rail.material.emissive.set(0x000000);
+    h.rail.material.emissiveIntensity = 0;
+  }
+  hippoUpdateHUD(!H.armed);
 }
 
 // Common materials/helpers
@@ -5917,6 +6291,14 @@ function updateCarrotHUD() {
     + `<span style="color:#ffd944;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${money}</span>`
     + `</div>`;
 
+  // Rosettes: only shown once the kid has won at least one at the hipodrom.
+  if (rosettes > 0) {
+    html += `<div class="row" style="font-size:40px;font-weight:900;line-height:1.1;display:flex;align-items:center;gap:8px">`
+      + `<span style="font-size:48px">🏵️</span>`
+      + `<span style="color:#ff9ecb;text-shadow:2px 2px 0 rgba(0,0,0,0.5)">× ${rosettes}</span>`
+      + `</div>`;
+  }
+
   // Inventory: one row per item, same emoji × N formatting for consistency.
   // Consumable items also get a key hint on the same row.
   for (const k of Object.keys(SHOP_ITEMS)) {
@@ -6057,6 +6439,16 @@ function drawMinimap() {
     ctx.fillStyle = '#3098d0';
     ctx.fillRect(px, waterPx, 1, H - waterPx);
   }
+
+  // Hipodrom marker (green ring with a jump icon)
+  const hpp = toMap(HIPPO.cx, HIPPO.cz);
+  ctx.strokeStyle = '#4dc94d';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(hpp.x, hpp.y, 5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = '#4dc94d';
+  ctx.fillRect(hpp.x - 1, hpp.y - 4, 2, 8);
 
   // City buildings markers
   const cmp = toMap(0, CITY_CENTER_Z);
@@ -6308,6 +6700,11 @@ const HorseMotion = {
       runTimer += dt;
       const gallopT = THREE.MathUtils.clamp((runTimer - 1.5) / 3.0, 0, 1);
       currentMaxSpeed = THREE.MathUtils.lerp(BASE_SPEED, MAX_SPEED, gallopT);
+      // Inside the hipodrom the horse is reined to a controlled canter so each
+      // jump clears exactly one hurdle (one deliberate jump = +1).
+      if (hippoBuilt && HIPPO.contains(horsePos.x, horsePos.z)) {
+        currentMaxSpeed = Math.min(currentMaxSpeed, HIPPO.arenaSpeed);
+      }
       const targetSpeed = currentMaxSpeed * sprintMult * input.forward;
       horseSpeed = THREE.MathUtils.lerp(horseSpeed, targetSpeed, dt * 5);
     } else {
@@ -6518,6 +6915,7 @@ function update() {
   animateFireworks(dt);
   animateSprintSparkles(dt);
   updateInteractionZones(dt);
+  updateHippodrome(dt);
   updateMobileButtons();
   updateLetterDelivery(dt);
   updateMud();
@@ -7012,7 +7410,7 @@ function saveState() {
 
   const state = {
     horseX: horsePos.x, horseY: horsePos.y, horseZ: horsePos.z,
-    horseAngle, horseSpeed, carrots, applesCollected, money, inventory, level, groomLevel, isDirty, coatSkin,
+    horseAngle, horseSpeed, carrots, applesCollected, money, rosettes, inventory, level, groomLevel, isDirty, coatSkin,
     correctAnswers, totalAnswers, runTimer,
     challenges: savedChallenges,
     gameStarted: true,
@@ -7071,6 +7469,7 @@ window.startGame = async function () {
     carrots = saved.carrots;
     applesCollected = saved.applesCollected || 0;
     money = saved.money || 0;
+    rosettes = saved.rosettes || 0;
     Stamina.set(MAX_STAMINA); // always start a session full — never restore a drained bar
     if (saved.inventory) {
       inventory = { napoj: 0, siano: 0, diament: 0, odznaka: 0, list: 0, podkowa: 0, fajerwerki: 0, ...saved.inventory };
