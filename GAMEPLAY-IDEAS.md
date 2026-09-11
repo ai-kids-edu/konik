@@ -254,3 +254,11 @@ Koń jest ściągany do kłusu w arenie (`arenaSpeed`) żeby jeden skok = jeden 
 **Do dopracowania później:** tuning okna detekcji skoku w live-play, sędzia-NPC/animacja wiwatu,
 warianty (co 2 / co 5), kamera slow-mo na finiszu. Następne filary: dopełnianie combine-to-feed,
 transport (load≠deliver), `challenge.type`.
+
+### Hipodrom v2 (po review): XL + kolizje + anty-softlock
+- **Tor wzdłuż Z** (korytarz ma ~300 m): rozstaw 10 m = realny rozbieg; kłus cap 9.
+- **Kolizje płotu** (5 odcinków w `barnColliders`, brama północna otwarta); płotki bez kolizji (przeskakujesz). Weryfikacja statyczna przeszła.
+- **Anty-softlock (krytyczny fix z review):** detekcja przez PRZECIĘCIE płotka — airborne = zaliczony, na ziemi = zrzut. Wcześniej zbyt wczesny skok blokował płotek na zawsze. Fizyka: łuk ~7,2 m < 10 m rozstaw = jedno przecięcie/skok (brak double/skip).
+- **Cue dla nieczytających:** bujająca strzałka nad następnym płotkiem + pulsujący płotek; miss-popup z ikoną ⤴️.
+- Flagi bramy + poprawny znak wjazdu; wyzwania-bramki wykluczone z footprintu.
+- **Otwarte:** pełny reset po zrzucie (miss teraz rzadki, ale rozważyć zachowanie postępu); płot farmy nadal bez kolizji (brak bramy — decyzja właściciela).
