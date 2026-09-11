@@ -279,3 +279,11 @@ Po testach: dopełnianie było frustrujące/niejasne. Zmiana na **zabawę w skak
 - **Farma zamknięta** — pełny płot dookoła, wjazd przez przeskok (jak każdy jumpable płot).
 - Guard: challenge liczenia nigdy nie spawnuje na torze (fallback przesuwa na wschód od areny).
 - Bez równań/resetu/utraty postępu. Odznaka 🏵️ = nagroda (do decyzji: nosić/półka/waluta).
+
+### v51 — prawdziwa trasa: ósemka START→META + poprawki z review
+- **Figure-8** (przecinająca się jak na zawodach), namalowana na piasku (world→canvas), 6 numerowanych bramek w kolejności jazdy, bramka **START·META** (szachownica) na górze.
+- **Stan przejazdu**: idle → przejedź START → running (licznik bramek) → przejedź METĘ (po objechaniu trasy) → wynik. **Komunikat dopiero na mecie** (koniec nudnej nieskończonej pętli).
+- Czysty przejazd (wszystkie bramki) = 🏵️ + monety; niepełny = „X/6, spróbuj wszystkie" bez kary.
+- Review fixes: reset `_jumpGrace` na starcie (brak instant-clear), challenge guard poza footprint (`cx=cx+halfX+10`), usunięty martwy kod (_touched, flaga START, _hippoStartTag), nudge „Skacz!" gdy przejeżdżasz bramkę po ziemi.
+- **Fix płotu**: lądowanie na linii collidera nie wymaga już drugiego skoku (wyjście z collidera dozwolone).
+- Farma zamknięta (jumpable), znak wjazdowy podniesiony na słupach.
