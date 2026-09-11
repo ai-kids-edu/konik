@@ -98,17 +98,20 @@ Quaternius):
 **The cheetah / big-cat answer (updated after the Henry S follow-up research):**
 - **Henry S is a dead end for siblings** — the author has only two public models (our horse + a
   static truck). No animal set to harvest.
-- **A consistent free *realistic* animal set is not achievable.** The one author who could supply one
-  (WildMesh 3D + siblings — lion/tiger/fox/deer/pig… 60–145 anims each) ships "free" as
-  personal-use-only (commercial requires a Fab/Patreon purchase) = paid-EULA in disguise → reject for
-  a public repo. Most other "realistic free" animals are game-rips (Google AR / GTA) — usable in
-  practice but not clean IP.
-- **No clean CC-BY *cheetah* exists** (a literal cheetah is a GTA rip). Best substitute big cats to
-  replace the scaled-fox: **vukhiemton "Realistic Lion"** (excellent rig — idle/walk/run/roar/sit,
-  lightest at ~9k tris, original — but its download is off-Sketchfab via Fab.com, **verify the free
-  tier allows redistribution** before use); fallback **MotionStreamStudios "White Tiger"** (clean
-  one-click CC-BY on Sketchfab, ~33k tris, but likely Google-AR-derived). ⚠️ The White Tiger page
-  carries a phishing "verify your account" comment in third-party content — ignore it.
+- **WildMesh 3D — license clarified (an earlier note wrongly rejected them wholesale).** It's
+  **per-model, two regimes**: their **free *downloadable* models are standard Creative Commons** —
+  e.g. the **Lioness = CC BY-NC 4.0**, the **Stylized Animals BIG PACK = CC BY 4.0** — which **ARE
+  usable** for this game (CC BY-NC permits redistribution + serving the raw `.glb`, as long as we stay
+  **non-commercial** and credit the author). Only their **realistic showcase Lion/Tiger**
+  (AnimalMesh/CoreMesh accounts) are **view-only + "personal use only" EULA, not downloadable free** →
+  not usable. So a full *realistic* set is still out, but individual free WildMesh CC models are fine.
+- **No clean CC-BY realistic *cheetah/leopard* exists** (a literal one is a GTA rip). Best free big-cat
+  substitutes for the "cheetah": **WildMesh Lioness (CC BY-NC 4.0, free, ~16.5k tris)** — usable now
+  with attribution + non-commercial; or a **stylized cat from the WildMesh CC BY BIG PACK**. The
+  realistic Lion/Tiger showcases are Patreon-paid and, even bought, a client-side site serving the raw
+  file may still violate the paid EULA — avoid.
+  ⚠️ Not-a-lawyer note: "non-commercial" is the load-bearing condition — adding ads/sales later breaks
+  CC-NC. Record every CC-BY/CC-BY-NC asset in `CREDITS.md`.
 - **Direction:** keep the CC0 Quaternius farm animals (deer/dog/fox/donkey have no clean realistic
   upgrade), treat the **Henry S horse as the sole realistic hero**, and add **at most one more
   realistic hero — a big cat** for the "cheetah". A full realistic zoo also blows the tablet/Pages
