@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 28, label: 'Fix odbicia' };
+const GAME_VERSION = { number: 29, label: 'Modul kamery' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -629,9 +629,7 @@ let drinkTimer = 0;
 
 // Horse movement
 const horsePos = new THREE.Vector3(0, 0, 0);
-// Scratch vector reused every frame for camera target — avoids per-frame allocation.
-const _scratchCamTarget = new THREE.Vector3();
-window.__horse = { get pos() { return horsePos; }, get angle() { return horseAngle; }, set angle(v) { horseAngle = v; } };
+window.__horse ={ get pos() { return horsePos; }, get angle() { return horseAngle; }, set angle(v) { horseAngle = v; } };
 let horseAngle = 0;
 let horseSpeed = 0;
 const BASE_SPEED = 8;
@@ -6292,6 +6290,32 @@ const HorseMotion = {
   },
 };
 
+// ========== CAMERA ==========
+// Follow the horse from behind; swing to the side during eating so the carrots
+// are visible. One scratch vector, no per-frame allocation.
+const Camera = {
+  _target: new THREE.Vector3(),
+  follow(dt) {
+    if (isEatingCarrots) {
+      const perpX = Math.cos(horseAngle), perpZ = -Math.sin(horseAngle);
+      this._target.set(
+        horsePos.x + perpX * 3 + Math.sin(horseAngle) * 0.5,
+        horsePos.y + 1.5,
+        horsePos.z + perpZ * 3 + Math.cos(horseAngle) * 0.5);
+    } else {
+      this._target.set(
+        horsePos.x - Math.sin(horseAngle) * 6,
+        horsePos.y + 4.5,
+        horsePos.z - Math.cos(horseAngle) * 6);
+    }
+    camera.position.lerp(this._target, dt * 3);
+    camera.lookAt(
+      horsePos.x + Math.sin(horseAngle) * (isEatingCarrots ? 1 : 2),
+      horsePos.y + (isEatingCarrots ? 0.5 : 1.0),
+      horsePos.z + Math.cos(horseAngle) * (isEatingCarrots ? 1 : 2));
+  },
+};
+
 // ========== GAME LOOP ==========
 function update() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -6327,29 +6351,7 @@ function update() {
   // Animate horse
   animateHorse(dt, input);
 
-  // Camera follow — reuse a single scratch Vector3 per frame instead of alloc.
-  // Camera — during eating, swing to the side so carrots are visible
-  if (isEatingCarrots) {
-    const perpX = Math.cos(horseAngle);
-    const perpZ = -Math.sin(horseAngle);
-    _scratchCamTarget.set(
-      horsePos.x + perpX * 3 + Math.sin(horseAngle) * 0.5,
-      horsePos.y + 1.5,
-      horsePos.z + perpZ * 3 + Math.cos(horseAngle) * 0.5
-    );
-  } else {
-    _scratchCamTarget.set(
-      horsePos.x - Math.sin(horseAngle) * 6,
-      horsePos.y + 4.5,
-      horsePos.z - Math.cos(horseAngle) * 6
-    );
-  }
-  camera.position.lerp(_scratchCamTarget, dt * 3);
-  camera.lookAt(
-    horsePos.x + Math.sin(horseAngle) * (isEatingCarrots ? 1 : 2),
-    horsePos.y + (isEatingCarrots ? 0.5 : 1.0),
-    horsePos.z + Math.cos(horseAngle) * (isEatingCarrots ? 1 : 2)
-  );
+  Camera.follow(dt);
 
   // Challenge management
   challengeCooldown -= dt;
