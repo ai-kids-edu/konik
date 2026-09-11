@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 33, label: 'Lśniąca sierść' };
+const GAME_VERSION = { number: 34, label: 'Kokarda na grzywie' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -681,6 +681,7 @@ let sprintSparkles = [];
 // Firework burst particles (fajerwerki consume)
 let fireworkParticles = [];
 let runTimer = 0; // how long we've been running continuously
+let sprintMultCurrent = 1.0; // eased sprint multiplier (smooths the exhaustion drop)
 
 // Terrain constants
 const WORLD_SIZE = 900;          // total terrain plane size
@@ -6298,7 +6299,12 @@ const HorseMotion = {
     horseAngle += input.turn * TURN_SPEED * dt;
 
     // Gallop acceleration: max speed ramps the longer you keep running.
-    const sprintMult = isSprinting ? SPRINT_MULT : 1.0;
+    // Ease the sprint multiplier toward its target so hitting empty glides down
+    // from sprint to the normal gallop speed instead of snapping (which read as a
+    // brief stop). Ramp up fast, ease down gently.
+    const sprintTarget = isSprinting ? SPRINT_MULT : 1.0;
+    sprintMultCurrent = THREE.MathUtils.lerp(sprintMultCurrent, sprintTarget, dt * (isSprinting ? 8 : 3));
+    const sprintMult = sprintMultCurrent;
     if (Math.abs(input.forward) > 0.1) {
       runTimer += dt;
       const gallopT = THREE.MathUtils.clamp((runTimer - 1.5) / 3.0, 0, 1);
