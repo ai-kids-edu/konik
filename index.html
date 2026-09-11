@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 22, label: 'Poślizg' };
+const GAME_VERSION = { number: 23, label: 'Biała skóra' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1615,6 +1615,12 @@ let horseHairMats = [];
 const hairOrigMaps = new Map();
 let coatColor = 0xe9e2d3; // natural warm off-white (not snow-white); salon can recolour
 let coatOrigImg = null;   // the model's own coat texture — reused for real fur shading
+let coatWhiteImg = null;  // optional hand-made white coat skin (models/horse_coat_white.png)
+function loadCoatSkin() {
+  new THREE.TextureLoader().load('models/horse_coat_white.png',
+    (t) => { coatWhiteImg = t.image; refreshHorseLook(); },
+    undefined, () => {}); // absent → fall back to whitening the model's own texture
+}
 let _coatCanvas = null, _coatTex = null, _hairCanvas = null, _hairTex = null;
 
 function ensureGroomAccessories() {
@@ -1636,10 +1642,12 @@ function paintCoat() {
   const ctx = _coatCanvas.getContext('2d');
   ctx.globalCompositeOperation = 'source-over';
   const hex = '#' + coatColor.toString(16).padStart(6, '0');
-  if (coatOrigImg) {
-    // Keep the model's own coat for its soft shading and face, then wash the
-    // whole thing toward the coat colour so the brown pinto patches fade to white
-    // uniformly — a clean off-white coat, no harsh per-pixel blotches.
+  if (coatWhiteImg) {
+    // Purpose-made white coat skin (same UV) — already finished, draw as-is.
+    ctx.drawImage(coatWhiteImg, 0, 0, S, S);
+  } else if (coatOrigImg) {
+    // Fallback: keep the model's own coat, then wash toward the coat colour so
+    // the brown pinto patches fade to white uniformly — no harsh blotches.
     const cr = (coatColor >> 16) & 255, cg = (coatColor >> 8) & 255, cb = coatColor & 255;
     ctx.drawImage(coatOrigImg, 0, 0, S, S);
     ctx.fillStyle = `rgba(${cr},${cg},${cb},0.88)`;
@@ -5111,6 +5119,7 @@ function createHorse() {
   horseGroup.traverse(c => { if (c.isMesh) c.castShadow = true; });
   scene.add(horseGroup);
   refreshHorseLook();
+  loadCoatSkin(); // async: swaps in the purpose-made white skin if present
 }
 
 // ========== CHALLENGES ==========
