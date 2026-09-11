@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 53, label: 'Fix: maść nie bieleje po salonie' };
+const GAME_VERSION = { number: 54, label: 'Fix: błoto matowe + kokarda w poprzek' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1750,8 +1750,7 @@ function ensureGroomAccessories() {
     // Cancel the bone's bind rotation so the bow sits upright at rest, then still
     // follows the bone through the animation. Place it just above the crest.
     const wq = new THREE.Quaternion(); bone.getWorldQuaternion(wq);
-    bow.quaternion.copy(wq.clone().invert()); // upright, face toward rear (default camera)
-    bow.rotateZ(Math.PI / 2);                  // stand it portrait: a tall mane bow, not a wide band
+    bow.quaternion.copy(wq.clone().invert()); // upright, face toward rear (default camera); worn across the mane
     const wp = new THREE.Vector3(); bone.getWorldPosition(wp);
     bow.position.copy(bone.worldToLocal(wp.clone().add(new THREE.Vector3(0, 0.24, 0.02))));
   } else {
@@ -1852,12 +1851,15 @@ function refreshHorseLook() {
   // but washes a coloured maść (gniady/bułany) toward white, so use the strong
   // glow only for white; coloured coats get their shine from lower roughness +
   // a touch of metalness (specular highlight), which keeps the colour.
+  // A muddy horse is matte — no shine — so the mud reads clearly (the sheen was
+  // washing the mud out too). Only a clean, groomed horse gets the glossy look.
+  const glossLevel = isDirty ? 0 : groomLevel;
   const isWhite = coatSkin === 'white';
-  const gloss = isWhite ? Math.min(0.5, 0.2 * groomLevel) : Math.min(0.1, 0.04 * groomLevel);
+  const gloss = isWhite ? Math.min(0.5, 0.2 * glossLevel) : Math.min(0.1, 0.04 * glossLevel);
   for (const m of horseCoatMats) {
     if (m.emissive) { m.emissive.setHex(isWhite ? 0xfff6fb : 0xffffff); m.emissiveIntensity = gloss; }
-    if ('roughness' in m) m.roughness = Math.max(0.12, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.3 * groomLevel);
-    if ('metalness' in m) m.metalness = Math.min(isWhite ? 0.35 : 0.22, (isWhite ? 0.12 : 0.08) * groomLevel);
+    if ('roughness' in m) m.roughness = Math.max(0.12, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.3 * glossLevel);
+    if ('metalness' in m) m.metalness = Math.min(isWhite ? 0.35 : 0.22, (isWhite ? 0.12 : 0.08) * glossLevel);
     m.needsUpdate = true;
   }
   if (groomLevel >= 3) paintHairRainbow(); else restoreHair();
