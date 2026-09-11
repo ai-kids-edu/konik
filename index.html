@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 50, label: 'Półka trofeów 🏵️' };
+const GAME_VERSION = { number: 51, label: 'Zmiana konia w stajni' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1469,6 +1469,8 @@ function updateInteractionZones(dt) {
         cue = Economy.canBuy(zone.itemKey);
       } else if (zone.kind === 'groom') {
         cue = isDirty || (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice());
+      } else if (zone.kind === 'stable') {
+        cue = true; // always inviting — pick a horse any time
       }
     }
     zone.beacon.material.emissiveIntensity = cue ? (0.6 + pulseT * 1.4) : 0.35;
@@ -1573,6 +1575,21 @@ function updateInteractionPrompt(activeZone) {
         + `<div style="margin-top:6px">Naciśnij ${actionHintHTML(GROOM.keyLabel, kbdStyle)}</div>`
         + `<div style="margin-top:10px;font-size:36px;opacity:0.9">Uczesz konika — ${price} <span style="font-size:56px">🪙</span></div>`;
     }
+  } else if (activeZone.kind === 'stable') {
+    // Pick a coat by pressing its number. Numbers fit a maths game and dodge the
+    // E=jump binding.
+    let chips = '';
+    COAT_SKINS.forEach((c, i) => {
+      const sel = c.key === coatSkin;
+      chips += `<div style="display:inline-block;text-align:center;margin:0 10px;opacity:${sel ? 1 : 0.85}">`
+        + `<div style="width:74px;height:74px;border-radius:16px;background:${c.chip};`
+        + `border:5px solid ${sel ? '#ffd700' : 'rgba(255,255,255,0.35)'};margin:0 auto"></div>`
+        + `<div style="margin-top:8px"><span style="${kbdStyle};font-size:40px;padding:2px 14px">${i + 1}</span></div>`
+        + `<div style="font-size:26px;margin-top:4px;color:#fff">${c.name}</div></div>`;
+    });
+    html = `<div style="font-size:64px;line-height:1">🐴</div>`
+      + `<div style="margin-top:6px;font-size:36px;opacity:0.95">Wybierz konika — naciśnij cyfrę</div>`
+      + `<div style="margin-top:16px;display:flex;justify-content:center">${chips}</div>`;
   }
   setHTMLIfChanged(sellPromptEl, html);
   sellPromptEl.style.opacity = '1';
@@ -1674,6 +1691,16 @@ function loadCoatSkin() {
   new THREE.TextureLoader().load(`models/horse_coat_${coatSkin}.webp`,
     (t) => { coatWhiteImg = t.image; refreshHorseLook(); },
     undefined, () => { coatWhiteImg = null; refreshHorseLook(); }); // absent → fall back to whitening the model's own texture
+}
+// In-world horse swap: stand in the stable zone and press 1/2/3.
+function attemptSelectHorse(idx) {
+  const zone = interactionZones.find(z => z.kind === 'stable' && z.inZone);
+  if (!zone) return;
+  const c = COAT_SKINS[idx];
+  if (!c || c.key === coatSkin) return;
+  coatSkin = c.key;
+  if (horse) loadCoatSkin();
+  try { saveState(); } catch {}
 }
 function initCoatPicker() {
   const wrap = document.querySelector('#coat-picker .cp-options');
@@ -5106,6 +5133,22 @@ function createFarm() {
     stableBounds = sb;
   }
 
+  // Horse-change zone in front of the stable: stand here and press 1/2/3 to
+  // switch the horse's coat (maść). A blue beacon marks it.
+  const szx = barnX, szz = barnZ + bD / 2 + 3;
+  const szBeacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x8fd0ff, emissive: 0x8fd0ff, emissiveIntensity: 0.6, transparent: true, opacity: 0.85 })
+  );
+  szBeacon.position.set(szx, barnH + 3.4, szz);
+  scene.add(szBeacon);
+  const szR = 5;
+  interactionZones.push({
+    minX: szx - szR, maxX: szx + szR, minZ: szz - szR, maxZ: szz + szR,
+    cx: szx, cz: szz, counterX: szx, counterZ: szz,
+    beacon: szBeacon, kind: 'stable', inZone: false,
+  });
+
   // Water trough (simple geometry — no GLB for this)
   const troughX = fx - 5, troughZ = fz + 2;
   const troughH = getTerrainHeight(troughX, troughZ);
@@ -6080,6 +6123,10 @@ function initInput() {
       for (const [itemKey, it] of Object.entries(SHOP_ITEMS)) {
         if (itemKey !== 'fajerwerki' && e.code === it.key) attemptBuyItem(itemKey);
       }
+      // Horse coat swap in the stable zone (numbers suit a maths game).
+      if (e.code === 'Digit1' || e.code === 'Numpad1') attemptSelectHorse(0);
+      if (e.code === 'Digit2' || e.code === 'Numpad2') attemptSelectHorse(1);
+      if (e.code === 'Digit3' || e.code === 'Numpad3') attemptSelectHorse(2);
       // New consumable-action keys
       if (e.code === 'KeyE') attemptJump();
       if (e.code === 'KeyZ') attemptEatHay();
@@ -6268,6 +6315,15 @@ function computeMobileActions() {
     } else if (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
       contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptSalonAction });
     }
+  }
+  // Stable — a coloured button per coat (mobile has no number keys). Distinct
+  // dots so a non-reader never faces identical emoji.
+  if (z && z.kind === 'stable') {
+    const dot = { white: '⚪', gniady: '🟤', bulany: '🟡' };
+    COAT_SKINS.forEach((c, i) => {
+      contextual.push({ id: 'coat:' + c.key, emoji: dot[c.key] || '🐴',
+        glow: c.key !== coatSkin, action: () => attemptSelectHorse(i) });
+    });
   }
   // Buy button goes last (nearest the thumb).
   if (buyBtn) contextual.push(buyBtn);
