@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 13, label: 'Płynniej' };
+const GAME_VERSION = { number: 14, label: 'Tempo' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -605,13 +605,13 @@ window.__horse = { get pos() { return horsePos; }, get angle() { return horseAng
 let horseAngle = 0;
 let horseSpeed = 0;
 const BASE_SPEED = 8;
-const MAX_SPEED = 14;
+const MAX_SPEED = 12.6;
 let currentMaxSpeed = BASE_SPEED;
 // Jump physics (E key)
 let isJumping = false;
 let jumpVy = 0;
 const MAX_STAMINA = 100;
-const SPRINT_MULT = 1.5;
+const SPRINT_MULT = 1.7;
 const SPRINT_DRAIN_PER_SEC = 20;
 const STAMINA_REGEN_PER_SEC = 3;
 const NAPOJ_STAMINA = 30;
