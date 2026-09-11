@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 52, label: 'Fix: maść mimo wyczesania' };
+const GAME_VERSION = { number: 53, label: 'Fix: maść nie bieleje po salonie' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1848,13 +1848,16 @@ function restoreHair() {
 function refreshHorseLook() {
   if (!horse) return;
   paintCoat();
-  // Groomed = a genuine silky sheen: a clean white glow + much sharper highlights
-  // (low roughness), so the first salon visit reads as an obvious glow-up.
-  const gloss = Math.min(0.5, 0.2 * groomLevel);
+  // Groomed = a silky sheen. A white emissive glow reads great on the white coat
+  // but washes a coloured maść (gniady/bułany) toward white, so use the strong
+  // glow only for white; coloured coats get their shine from lower roughness +
+  // a touch of metalness (specular highlight), which keeps the colour.
+  const isWhite = coatSkin === 'white';
+  const gloss = isWhite ? Math.min(0.5, 0.2 * groomLevel) : Math.min(0.1, 0.04 * groomLevel);
   for (const m of horseCoatMats) {
-    if (m.emissive) { m.emissive.setHex(0xfff6fb); m.emissiveIntensity = gloss; }
+    if (m.emissive) { m.emissive.setHex(isWhite ? 0xfff6fb : 0xffffff); m.emissiveIntensity = gloss; }
     if ('roughness' in m) m.roughness = Math.max(0.12, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.3 * groomLevel);
-    if ('metalness' in m) m.metalness = Math.min(0.35, 0.12 * groomLevel);
+    if ('metalness' in m) m.metalness = Math.min(isWhite ? 0.35 : 0.22, (isWhite ? 0.12 : 0.08) * groomLevel);
     m.needsUpdate = true;
   }
   if (groomLevel >= 3) paintHairRainbow(); else restoreHair();
