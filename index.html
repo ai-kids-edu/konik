@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 60, label: 'Arena wypłaszczona 🏁' };
+const GAME_VERSION = { number: 61, label: 'Arena krótsza 🏁' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2621,7 +2621,7 @@ function createWildWestTown() {
 // gates were cleared this lap. Clearing them all = a clean round (rosette).
 const HIPPO = {
   cx: -50, cz: -150,          // arena centre (empty western outskirts)
-  halfX: 22, halfZ: 50,       // fence half-extents
+  halfX: 22, halfZ: 44,       // fence half-extents (trimmed to hug the figure-8)
   laneX: -50,                 // north entrance sits on the lane centre
   rx: 16, rz: 38,             // figure-8 course radii (fits inside the fence)
   courseGates: 6,             // gates along the course
