@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 31, label: 'Wybór konika' };
+const GAME_VERSION = { number: 32, label: 'Maść tylko na starcie' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1642,12 +1642,6 @@ function loadCoatSkin() {
     (t) => { coatWhiteImg = t.image; refreshHorseLook(); },
     undefined, () => { coatWhiteImg = null; refreshHorseLook(); }); // absent → fall back to whitening the model's own texture
 }
-function cycleCoatColor() {
-  const i = COAT_SKINS.findIndex(c => c.key === coatSkin);
-  coatSkin = COAT_SKINS[(i + 1) % COAT_SKINS.length].key;
-  loadCoatSkin();
-}
-function setCoatSkin(key) { if (coatSkin === key) return; coatSkin = key; loadCoatSkin(); }
 function initCoatPicker() {
   const wrap = document.querySelector('#coat-picker .cp-options');
   if (!wrap) return;
@@ -5536,11 +5530,6 @@ function initInput() {
       if (e.code === 'KeyE') attemptJump();
       if (e.code === 'KeyZ') attemptEatHay();
       if (e.code === GROOM.key) attemptSalonAction();
-      // At the salon, C recolours the coat (cycles through the skins).
-      if (e.code === 'KeyC' && activeGroomZone() && !isGrooming) {
-        cycleCoatColor();
-        showConsumePopup('🎨 Nowy kolor!');
-      }
       // W is a movement key too — this only fires on fresh press to consume napoj
       if (e.code === 'KeyW') attemptDrinkWater();
       // F: buy fajerwerki when inside its buy zone, else consume from inventory
@@ -5725,8 +5714,6 @@ function computeMobileActions() {
     } else if (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
       contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptSalonAction });
     }
-    // Recolour the coat — available at the salon whenever not muddy.
-    if (!isDirty) contextual.push({ id: 'color', emoji: '🎨', action: () => { cycleCoatColor(); showConsumePopup('🎨 Nowy kolor!'); } });
   }
   // Buy button goes last (nearest the thumb).
   if (buyBtn) contextual.push(buyBtn);
