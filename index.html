@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 21, label: 'Biały fix + chody' };
+const GAME_VERSION = { number: 22, label: 'Poślizg' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -6062,6 +6062,8 @@ function switchHorseAnim(name) {
 }
 
 const SWIM_DEPTH = 1.0; // only swim in properly deep water, never shallow wading
+let prevHorseSpeed = 0;
+let isStopping = false;  // playing the Run_Stop skid — don't let the gait selector override it
 function animateHorse(dt, input) {
   if (!horseMixer) return;
   horseMixer.update(dt);
@@ -6073,6 +6075,17 @@ function animateHorse(dt, input) {
   const turning = Math.abs(turn) > 0.35;
   const lean = turn > 0 ? '_l' : '_r'; // lean into the turn (flip if it looks wrong)
   const deep = getWaterDepth(horsePos.x, horsePos.z) > SWIM_DEPTH;
+
+  if (isStopping) { prevHorseSpeed = speed; return; }
+  // Run_Stop: a skid when braking hard from a gallop to a halt (not from a walk).
+  if (horseActions.run_stop && prevHorseSpeed > BASE_SPEED + 2 && !moving && speed < 2 && !deep) {
+    isStopping = true;
+    playHorseAnimation('run_stop', 700);
+    setTimeout(() => { isStopping = false; }, 700);
+    prevHorseSpeed = speed;
+    return;
+  }
+  prevHorseSpeed = speed;
 
   let gait;
   if (deep) {
