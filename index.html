@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 59, label: 'Bez popupu skacz 🏁' };
+const GAME_VERSION = { number: 60, label: 'Arena wypłaszczona 🏁' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -822,6 +822,23 @@ function getExtendedHeight(x, z) {
 }
 
 function getTerrainHeight(x, z) {
+  // Level the hipodrom to a flat pad (real jumping arenas are flat) so the fence
+  // rails, gates and sand all sit at one clean height. Short blend at the edge
+  // avoids a cliff by the fence. _flatY is cached on first use.
+  if (typeof HIPPO !== 'undefined' && HIPPO.cx !== undefined) {
+    const ox = Math.abs(x - HIPPO.cx) - HIPPO.halfX;
+    const oz = Math.abs(z - HIPPO.cz) - HIPPO.halfZ;
+    const outside = Math.max(ox, oz, 0);
+    if (outside < 6) {
+      if (HIPPO._flatY === undefined) {
+        HIPPO._flatY = Math.max(pseudoNoise(HIPPO.cx, HIPPO.cz), -0.2) + cliffHeight(HIPPO.cx, HIPPO.cz);
+      }
+      if (outside <= 0) return HIPPO._flatY;
+      const natural = Math.max(pseudoNoise(x, z), -0.2) + cliffHeight(x, z);
+      const tb = outside / 6;
+      return HIPPO._flatY * (1 - tb) + natural * tb;
+    }
+  }
   const bsz = beachStartZ(x);
   const wsz = waterStartZ(x);
   // Beach & water zone: flatten toward water
