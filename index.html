@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 12, label: 'Nowy koń' };
+const GAME_VERSION = { number: 13, label: 'Płynniej' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -5248,24 +5248,11 @@ function createChallenge() {
     bucketPivot.add(lidGroup);
     hayGroup.add(bucketPivot);
 
-    // Carrots spilling (hidden until correct reveal)
+    // Carrots only spill out when the correct bucket is revealed, so build them
+    // lazily then (buildCarrots). Cloning 18 GLB carrots per challenge up front —
+    // most never seen — caused the spawn-time frame hitch while running.
     const carrotsGroup = new THREE.Group();
     carrotsGroup.visible = false;
-    // Carrots scattered in front of bucket — use GLB model
-    for (let c = 0; c < 6; c++) {
-      // Carrot model height=0.5 at scale 1. We want ~0.4m → scale 0.8
-      const carrotModel = cloneModel('carrot', 0.8);
-      if (carrotModel) {
-        brightenModel(carrotModel, 2.0);
-        const spreadX = (Math.random() - 0.5) * 1.2;
-        const spreadZ = 0.8 + Math.random() * 1.2;
-        carrotModel.position.set(spreadX, 0.15, spreadZ);
-        // Laying on side, slightly tilted
-        carrotModel.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.3;
-        carrotModel.rotation.y = Math.random() * Math.PI * 2;
-        carrotsGroup.add(carrotModel);
-      }
-    }
     hayGroup.add(carrotsGroup);
 
     // Answer display — dots at level 1, numbers later
@@ -6518,9 +6505,24 @@ function updateFpsMeter() {
   }
 }
 
+function buildCarrots(pile) {
+  if (pile.carrotsBuilt) return;
+  pile.carrotsBuilt = true;
+  for (let c = 0; c < 6; c++) {
+    const carrotModel = cloneModel('carrot', 0.8); // ~0.4m
+    if (!carrotModel) continue;
+    brightenModel(carrotModel, 2.0);
+    carrotModel.position.set((Math.random() - 0.5) * 1.2, 0.15, 0.8 + Math.random() * 1.2);
+    carrotModel.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.3; // laid on side
+    carrotModel.rotation.y = Math.random() * Math.PI * 2;
+    pile.carrotsGroup.add(carrotModel);
+  }
+}
+
 function animateBucketTip(pile, isCorrect, challenge) {
   if (pile.revealed) return;
   pile.revealed = true;
+  if (isCorrect) buildCarrots(pile);
   const pivot = pile.bucketPivot;
   const lid = pile.lidGroup;
   const hayGroup = pivot.parent; // hayGroup is parent of bucketPivot
