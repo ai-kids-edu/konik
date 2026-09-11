@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 64, label: 'Siodlarnia na minimapie' };
+const GAME_VERSION = { number: 65, label: 'Pasażer siedzi w siodle' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7033,10 +7033,14 @@ function handleSpaceAction() {
     // Mount farmer on horse
     ridingFarmer = closest;
     closest.mounted = true;
-    // Remove from scene, add to horse group
+    // Remove from scene, add to horse group. Seat the rider over the saddle area
+    // (forward, toward the withers), lowered so the legs straddle the barrel and
+    // leaning slightly forward — reads as riding, not standing on the back. A
+    // bought saddle lifts them a touch so they sit in it.
     scene.remove(closest.group);
-    closest.group.position.set(0, 1.8, 0); // sitting on horse's back
-    closest.group.rotation.set(0, 0, 0);
+    const seatY = (inventory.siodlo || 0) > 0 ? 1.35 : 1.2;
+    closest.group.position.set(0, seatY, 0.45);
+    closest.group.rotation.set(-0.12, 0, 0);
     closest.group.scale.set(1, 1, 1); // relative to horse scale
     horseGroup.add(closest.group);
   }
