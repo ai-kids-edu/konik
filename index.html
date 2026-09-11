@@ -391,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 38, label: 'Płoty blokują + przeskok 🏇' };
+const GAME_VERSION = { number: 39, label: 'Mocniejszy połysk' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1796,10 +1796,13 @@ function restoreHair() {
 function refreshHorseLook() {
   if (!horse) return;
   paintCoat();
-  const gloss = Math.min(0.32, 0.11 * groomLevel);
+  // Groomed = a genuine silky sheen: a clean white glow + much sharper highlights
+  // (low roughness), so the first salon visit reads as an obvious glow-up.
+  const gloss = Math.min(0.5, 0.2 * groomLevel);
   for (const m of horseCoatMats) {
-    if (m.emissive) { m.emissive.setHex(0xffd9ec); m.emissiveIntensity = gloss; }
-    if ('roughness' in m) m.roughness = Math.max(0.25, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.16 * groomLevel);
+    if (m.emissive) { m.emissive.setHex(0xfff6fb); m.emissiveIntensity = gloss; }
+    if ('roughness' in m) m.roughness = Math.max(0.12, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.3 * groomLevel);
+    if ('metalness' in m) m.metalness = Math.min(0.35, 0.12 * groomLevel);
     m.needsUpdate = true;
   }
   if (groomLevel >= 3) paintHairRainbow(); else restoreHair();
