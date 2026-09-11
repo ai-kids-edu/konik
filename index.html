@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 15, label: 'Fryzjer 2.0' };
+const GAME_VERSION = { number: 16, label: 'Marchewki' };
 function renderVersionBadge() {
   const badge = document.getElementById('version-badge');
   if (badge) badge.textContent = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
@@ -6505,25 +6505,21 @@ function updateFpsMeter() {
   }
 }
 
-// Cheap primitive carrots sharing one geometry/material set, so revealing a
-// bucket costs ~nothing. (Cloning + brightening 6 GLB carrots on the correct
-// answer caused a noticeable hitch.)
-let _carrotGeo = null, _carrotMat = null, _carrotTopGeo = null, _carrotTopMat = null;
+// Real GLB carrots, but cheap: clone + brighten ONE template (once), then
+// Object3D.clone() it 6x per bucket. clone() shares geometry and materials, so
+// revealing a bucket is near-free — no per-carrot GLB clone or material work,
+// which is what hitched on a correct answer.
+let carrotTemplate = null;
 function buildCarrots(pile) {
   if (pile.carrotsBuilt) return;
   pile.carrotsBuilt = true;
-  if (!_carrotGeo) {
-    _carrotGeo = new THREE.ConeGeometry(0.07, 0.42, 7);
-    _carrotMat = new THREE.MeshLambertMaterial({ color: 0xff8c00 });
-    _carrotTopGeo = new THREE.ConeGeometry(0.05, 0.14, 5);
-    _carrotTopMat = new THREE.MeshLambertMaterial({ color: 0x33aa33 });
+  if (!carrotTemplate) {
+    carrotTemplate = cloneModel('carrot', 0.8); // ~0.4m; built once, reused forever
+    if (carrotTemplate) brightenModel(carrotTemplate, 2.0);
   }
+  if (!carrotTemplate) return;
   for (let c = 0; c < 6; c++) {
-    const carrot = new THREE.Group();
-    carrot.add(new THREE.Mesh(_carrotGeo, _carrotMat));
-    const top = new THREE.Mesh(_carrotTopGeo, _carrotTopMat);
-    top.position.y = 0.26;
-    carrot.add(top);
+    const carrot = carrotTemplate.clone();
     carrot.position.set((Math.random() - 0.5) * 1.2, 0.15, 0.8 + Math.random() * 1.2);
     carrot.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.3; // laid on side
     carrot.rotation.y = Math.random() * Math.PI * 2;
