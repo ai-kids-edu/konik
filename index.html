@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 23, label: 'Biała skóra' };
+const GAME_VERSION = { number: 24, label: 'Skóra webp' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1615,9 +1615,9 @@ let horseHairMats = [];
 const hairOrigMaps = new Map();
 let coatColor = 0xe9e2d3; // natural warm off-white (not snow-white); salon can recolour
 let coatOrigImg = null;   // the model's own coat texture — reused for real fur shading
-let coatWhiteImg = null;  // optional hand-made white coat skin (models/horse_coat_white.png)
+let coatWhiteImg = null;  // optional hand-made white coat skin (models/horse_coat_white.webp)
 function loadCoatSkin() {
-  new THREE.TextureLoader().load('models/horse_coat_white.png',
+  new THREE.TextureLoader().load('models/horse_coat_white.webp',
     (t) => { coatWhiteImg = t.image; refreshHorseLook(); },
     undefined, () => {}); // absent → fall back to whitening the model's own texture
 }
