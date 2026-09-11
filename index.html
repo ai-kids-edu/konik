@@ -313,6 +313,14 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
   height: 100%; width: 0%;
   background: linear-gradient(90deg, #ff9ecb, #ffd9ec);
 }
+#coat-picker { margin: 12px 0 6px; text-align: center; }
+#coat-picker .cp-label { color: #f6ecd0; font-size: 20px; font-weight: 800; margin-bottom: 8px; text-shadow: 1px 1px 0 rgba(0,0,0,0.4); }
+#coat-picker .cp-options { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+#coat-picker .cp-opt { cursor: pointer; border: 3px solid transparent; border-radius: 14px; padding: 6px 10px; background: rgba(0,0,0,0.25); display: flex; flex-direction: column; align-items: center; gap: 5px; transition: transform 0.1s, border-color 0.1s, background 0.1s; }
+#coat-picker .cp-opt:hover { transform: translateY(-2px); }
+#coat-picker .cp-opt.sel { border-color: #ffd54a; background: rgba(255,213,74,0.18); }
+#coat-picker .cp-chip { width: 46px; height: 46px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.7); box-shadow: inset 0 2px 6px rgba(0,0,0,0.3); }
+#coat-picker .cp-name { color: #fff; font-size: 15px; font-weight: 700; text-shadow: 1px 1px 0 rgba(0,0,0,0.5); }
 </style>
 </head>
 <body>
@@ -332,6 +340,10 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
     Policz i wjedź w <b>dobre wiaderko</b>!<br>
     Zbieraj 🍎 <b>jabłka</b> po drodze!<br><br>
     🎮 Steruj <b>strzałkami</b> na klawiaturze
+  </div>
+  <div id="coat-picker">
+    <div class="cp-label">Wybierz konika:</div>
+    <div class="cp-options"></div>
   </div>
   <button onclick="startGame()">GRAJ!</button>
 </div>
@@ -379,7 +391,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 30, label: 'Kolory konia' };
+const GAME_VERSION = { number: 31, label: 'Wybór konika' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1613,20 +1625,48 @@ let horseHairMats = [];
 const hairOrigMaps = new Map();
 let coatColor = 0xe9e2d3; // natural warm off-white (not snow-white); salon can recolour
 let coatOrigImg = null;   // the model's own coat texture — reused for real fur shading
-// Purpose-made coat skins (same UV as the model). The salon can switch between
-// them; each is models/horse_coat_<name>.webp.
-const COAT_SKINS = ['white', 'siwy', 'gniady', 'bulany'];
-let coatSkin = 'white';    // current colour; persisted in the save
 let coatWhiteImg = null;   // the loaded skin image; drawn in paintCoat
+
+// Coat skins (same UV as the model), each models/horse_coat_<key>.webp. Shared by
+// the intro picker AND the salon colour-change. name/chip drive the picker UI.
+const COAT_SKINS = [
+  { key: 'white',  name: 'Biały',  chip: '#efe9dd' },
+  { key: 'siwy',   name: 'Siwy',   chip: '#c9ccd1' },
+  { key: 'gniady', name: 'Gniady', chip: '#6d3f24' },
+  { key: 'bulany', name: 'Bułany', chip: '#c9a86a' },
+];
+let coatSkin = 'white';    // current colour; persisted in the save
 function loadCoatSkin() {
+  coatWhiteImg = null;
   new THREE.TextureLoader().load(`models/horse_coat_${coatSkin}.webp`,
     (t) => { coatWhiteImg = t.image; refreshHorseLook(); },
     undefined, () => { coatWhiteImg = null; refreshHorseLook(); }); // absent → fall back to whitening the model's own texture
 }
 function cycleCoatColor() {
-  coatSkin = COAT_SKINS[(COAT_SKINS.indexOf(coatSkin) + 1) % COAT_SKINS.length];
+  const i = COAT_SKINS.findIndex(c => c.key === coatSkin);
+  coatSkin = COAT_SKINS[(i + 1) % COAT_SKINS.length].key;
   loadCoatSkin();
 }
+function setCoatSkin(key) { if (coatSkin === key) return; coatSkin = key; loadCoatSkin(); }
+function initCoatPicker() {
+  const wrap = document.querySelector('#coat-picker .cp-options');
+  if (!wrap) return;
+  try { const s = loadState(); if (s && s.coatSkin) coatSkin = s.coatSkin; } catch {}
+  wrap.innerHTML = '';
+  for (const c of COAT_SKINS) {
+    const opt = document.createElement('div');
+    opt.className = 'cp-opt' + (c.key === coatSkin ? ' sel' : '');
+    opt.innerHTML = `<div class="cp-chip" style="background:${c.chip}"></div><div class="cp-name">${c.name}</div>`;
+    opt.onclick = () => {
+      coatSkin = c.key;
+      wrap.querySelectorAll('.cp-opt').forEach(e => e.classList.remove('sel'));
+      opt.classList.add('sel');
+      if (horse) loadCoatSkin(); // live-swap if a horse already exists
+    };
+    wrap.appendChild(opt);
+  }
+}
+initCoatPicker();
 let _coatCanvas = null, _coatTex = null, _hairCanvas = null, _hairTex = null;
 
 function ensureGroomAccessories() {
@@ -6993,7 +7033,8 @@ window.startGame = async function () {
     level = saved.level;
     groomLevel = saved.groomLevel || 0;
     isDirty = !!saved.isDirty;
-    if (saved.coatSkin && COAT_SKINS.includes(saved.coatSkin)) { coatSkin = saved.coatSkin; loadCoatSkin(); }
+    // coatSkin is owned by the intro picker (which pre-seeds from this save), so
+    // don't override the player's just-made choice here.
     refreshHorseLook();
     correctAnswers = saved.correctAnswers;
     totalAnswers = saved.totalAnswers;
