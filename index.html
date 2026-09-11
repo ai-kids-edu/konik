@@ -413,7 +413,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 62, label: 'Siodlarnia: kup siodło' };
+const GAME_VERSION = { number: 63, label: 'Szyld Siodlarnia' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -4036,7 +4036,7 @@ function buildBuyCounterDisplay(itemKey) {
 
 // Small prairie stragan (trading stall) — decorated buy counter selling fajerwerki.
 // Kids find it while exploring off-road on the prairie.
-function buildTradingStand(x, z, itemKey = 'fajerwerki') {
+function buildTradingStand(x, z, itemKey = 'fajerwerki', label = null) {
   // Counter faces west (toward the road) — frontDX = -1
   const frontDX = -1;
   buildBuyCounter(x, z, frontDX, itemKey);
@@ -4076,6 +4076,25 @@ function buildTradingStand(x, z, itemKey = 'fajerwerki') {
   roofPivot.rotation.x = -0.25 * frontDX;
   roofPivot.position.set(0, 3.35, -0.9 * frontDX);
   group.add(roofPivot);
+
+  // Optional name board across the front of the roof.
+  if (label) {
+    const sc = document.createElement('canvas');
+    sc.width = 512; sc.height = 128;
+    const c = sc.getContext('2d');
+    c.fillStyle = '#3a2208'; c.fillRect(0, 0, 512, 128);
+    c.strokeStyle = '#f6d990'; c.lineWidth = 8; c.strokeRect(6, 6, 500, 116);
+    c.fillStyle = '#f6ecd0'; c.font = 'bold 68px "Segoe UI",Arial,sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(label, 256, 70);
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.0, 0.75),
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, side: THREE.DoubleSide })
+    );
+    sign.position.set(0, 2.7, -1.5 * frontDX);
+    sign.rotation.y = frontDX < 0 ? Math.PI : 0; // readable face toward the customer approach
+    group.add(sign);
+  }
 
   group.position.set(x, h, z);
   scene.add(group);
@@ -5292,7 +5311,7 @@ function createFarm() {
   });
 
   // Saddlery (siodlarnia): a small stall by the stable selling the saddle.
-  buildTradingStand(fx - 10, fz + 10, 'siodlo');
+  buildTradingStand(fx - 10, fz + 10, 'siodlo', 'SIODLARNIA');
 
   // Water trough (simple geometry — no GLB for this)
   const troughX = fx - 5, troughZ = fz + 2;
