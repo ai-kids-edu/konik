@@ -409,7 +409,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 47, label: 'Koń bez cienia' };
+const GAME_VERSION = { number: 48, label: 'Fake blob pod koniem' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -5566,6 +5566,25 @@ function animateFarmAnimals(dt) {
 
 // ========== PLAYER HORSE (GLB model) ==========
 let horseMixer = null;
+let horseBlob = null; // fake ground shadow disc (built in createHorse)
+function buildHorseBlob() {
+  if (horseBlob) return;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d').createRadialGradient(32, 32, 2, 32, 32, 32);
+  g.addColorStop(0, 'rgba(0,0,0,0.55)');
+  g.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  const ctx = c.getContext('2d'); ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(1.7, 24),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.4, depthWrite: false })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.renderOrder = 1;
+  scene.add(mesh);
+  horseBlob = mesh;
+}
 let horseActions = {};
 
 function createHorse() {
@@ -5650,9 +5669,11 @@ function createHorse() {
     horse = body;
   }
 
-  // Horse casts no shadow (its moving cast-shadow looked bad and jittered).
+  // Horse casts no shadow (its moving cast-shadow looked bad and jittered);
+  // a cheap fake blob (below) grounds it instead.
   horseGroup.traverse(c => { if (c.isMesh) c.castShadow = false; });
   scene.add(horseGroup);
+  buildHorseBlob();
   refreshHorseLook();
   loadCoatSkin(); // async: swaps in the purpose-made white skin if present
   loadGroomedSkin(); // async: the freshly-groomed skin, shown from groom stage 1
@@ -6943,6 +6964,17 @@ function update() {
     horse.position.x = 0;
     horse.position.z = 0;
     horse.position.y = 0;
+  }
+
+  // Fake blob shadow — a soft dark disc that stays on the ground (ignores the
+  // jump arc) and shrinks/fades as the horse leaps. Costs nothing to light.
+  if (horseBlob) {
+    const gh = getTerrainHeight(horsePos.x, horsePos.z);
+    const lift = Math.max(0, horsePos.y - gh);
+    const k = Math.max(0.45, 1 - lift * 0.18);
+    horseBlob.position.set(horsePos.x, gh + 0.05, horsePos.z);
+    horseBlob.scale.set(k, k, 1);
+    horseBlob.material.opacity = 0.4 * k;
   }
 
   // Animate horse
