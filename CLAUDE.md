@@ -1,5 +1,9 @@
 # Konik Matematyczny — Development Guide
 
+> **See also [`AGENTS.md`](AGENTS.md)** for dev/test/release conventions — protecting the live family
+> save, the `?save_name=` test slots + `?cash=` cheat, local dev, and push discipline. Read it before
+> testing or pushing.
+
 ## Mission & Audience
 **For:** Kindergarteners (5-6 year olds, "zerówka" in Polish school system). These kids are just learning to count, add, and subtract. They CANNOT read — everything must be visual/iconic.
 

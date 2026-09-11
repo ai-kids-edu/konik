@@ -379,7 +379,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 17, label: 'Sloty testowe' };
+const GAME_VERSION = { number: 18, label: 'Sloty testowe' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -394,7 +394,7 @@ function renderVersionBadge() {
   if (!badge) return;
   let text = `v${GAME_VERSION.number} · ${GAME_VERSION.label}`;
   if (SAVE_NAME) text += ` · 🧪${SAVE_NAME}`;
-  if (CHEAT_CASH) text += ` · +${CHEAT_CASH}🪙`;
+  if (CHEAT_CASH && SAVE_NAME) text += ` · +${CHEAT_CASH}🪙`;
   badge.textContent = text;
 }
 renderVersionBadge();
@@ -6944,8 +6944,9 @@ window.startGame = async function () {
     for (let i = 0; i < 3; i++) createChallenge();
   }
 
-  // Testing top-up via ?cash=N (applies whether or not a save was loaded).
-  if (CHEAT_CASH) { money += CHEAT_CASH; updateCarrotHUD(); }
+  // Testing top-up via ?cash=N — only inside a named test slot, so the shared
+  // family save can never be cheated/polluted by a stray ?cash in the URL.
+  if (CHEAT_CASH && SAVE_NAME) { money += CHEAT_CASH; updateCarrotHUD(); }
 
   // Assign initial passenger delivery quests to townspeople
   if (farmers.length > 0) assignNewPassengerQuest();
