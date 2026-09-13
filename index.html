@@ -343,6 +343,69 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 #coat-picker .cp-opt.sel { border-color: #ffd54a; background: rgba(255,213,74,0.18); }
 #coat-picker .cp-chip { width: 46px; height: 46px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.7); box-shadow: inset 0 2px 6px rgba(0,0,0,0.3); }
 #coat-picker .cp-name { color: #fff; font-size: 15px; font-weight: 700; text-shadow: 1px 1px 0 rgba(0,0,0,0.5); }
+
+/* ===== Multiplayer: intro field ===== */
+#mp-field { margin: 6px 0 14px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+#mp-field .mp-label { color: #f6ecd0; font-size: 17px; font-weight: 800; text-shadow: 1px 1px 0 rgba(0,0,0,0.4); }
+#mp-field .mp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+#mp-field input { font-size: 18px; padding: 8px 14px; border-radius: 12px; border: 3px solid rgba(255,255,255,0.6); background: rgba(0,0,0,0.3); color: #fff; text-align: center; width: 190px; font-weight: 700; }
+#mp-field input::placeholder { color: rgba(255,255,255,0.5); font-weight: 500; }
+#mp-field .mp-auto { color: #f6ecd0; font-size: 14px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+#mp-field .mp-auto input { width: auto; transform: scale(1.4); }
+
+/* ===== In-game menu button + overlay ===== */
+#menu-fab {
+  position: fixed; top: 14px; right: 14px; z-index: 40;
+  width: 52px; height: 52px; border-radius: 14px; border: none;
+  background: rgba(0,0,0,0.45); color: #fff; font-size: 26px; cursor: pointer;
+  backdrop-filter: blur(4px); box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+  display: none; align-items: center; justify-content: center;
+}
+#menu-fab.show { display: flex; }
+#game-menu {
+  position: fixed; inset: 0; z-index: 200; display: none;
+  flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  background: radial-gradient(circle at center, rgba(30,60,90,0.55), rgba(10,20,35,0.85));
+  backdrop-filter: blur(6px);
+}
+#game-menu.show { display: flex; }
+#game-menu h2 { color: #fff; font-size: 34px; font-weight: 900; margin: 0 0 4px; text-shadow: 0 3px 0 rgba(0,0,0,0.4); font-family: "Segoe UI", Tahoma, sans-serif; }
+.gm-btn {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 50%, #FFD700 100%);
+  color: #fff; border: none; padding: 16px 46px; font-size: 22px; font-weight: 800;
+  border-radius: 40px; cursor: pointer; letter-spacing: 1px; min-width: 280px;
+  box-shadow: 0 5px 18px rgba(255,100,50,0.4); transition: transform 0.12s;
+}
+.gm-btn:hover { transform: scale(1.05); }
+.gm-btn:active { transform: scale(0.96); }
+.gm-btn.secondary { background: linear-gradient(135deg, #4a90d9 0%, #5fb0e5 100%); box-shadow: 0 5px 18px rgba(50,120,200,0.4); }
+.gm-btn.ghost { background: rgba(255,255,255,0.15); box-shadow: none; }
+#gm-mp-status { color: #ffe3a0; font-size: 18px; font-weight: 700; min-height: 24px; text-shadow: 0 2px 3px rgba(0,0,0,0.5); }
+#gm-secret { font-size: 18px; padding: 8px 14px; border-radius: 12px; border: 3px solid rgba(255,255,255,0.5); background: rgba(0,0,0,0.35); color: #fff; text-align: center; width: 200px; font-weight: 700; }
+
+/* status pill (in-game, shows connection at a glance) */
+#mp-pill {
+  position: fixed; top: 14px; right: 78px; z-index: 40; display: none;
+  align-items: center; gap: 6px; padding: 7px 14px; border-radius: 20px;
+  background: rgba(0,0,0,0.45); backdrop-filter: blur(4px); color: #fff;
+  font-size: 14px; font-weight: 700; box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+}
+#mp-pill.show { display: flex; }
+#mp-pill .dot { width: 11px; height: 11px; border-radius: 50%; background: #888; }
+#mp-pill.on .dot { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+#mp-pill.connecting .dot { background: #fbbf24; animation: mp-blink 0.8s infinite; }
+@keyframes mp-blink { 50% { opacity: 0.3; } }
+
+/* ===== Emote bar ===== */
+#emote-bar {
+  position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); z-index: 40;
+  display: none; gap: 8px; padding: 8px 12px; border-radius: 30px;
+  background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+#emote-bar.show { display: flex; }
+.emote-btn { font-size: 28px; background: rgba(255,255,255,0.12); border: none; border-radius: 50%; width: 50px; height: 50px; cursor: pointer; transition: transform 0.1s; }
+.emote-btn:hover { transform: scale(1.15); background: rgba(255,255,255,0.25); }
+.emote-btn:active { transform: scale(0.9); }
 </style>
 </head>
 <body>
@@ -367,7 +430,14 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
     <div class="cp-label">Wybierz konika:</div>
     <div class="cp-options"></div>
   </div>
-  <button onclick="startGame()">GRAJ!</button>
+  <div id="mp-field">
+    <div class="mp-label">👫 Wspólna jazda (hasło pokoju):</div>
+    <div class="mp-row">
+      <input id="mp-secret-input" type="text" maxlength="24" placeholder="np. tęcza123" autocomplete="off" spellcheck="false">
+      <label class="mp-auto"><input id="mp-auto-input" type="checkbox"> auto-połącz</label>
+    </div>
+  </div>
+  <button id="btn-play" onclick="startGame()">GRAJ!</button>
 </div>
 
 <div id="hud">
@@ -379,6 +449,20 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 <div id="feedback"></div>
 
 <div id="pause-overlay"><div class="pause-text">PAUZA</div><div class="pause-sub">Kliknij w okno, aby wrócić do gry</div></div>
+
+<button id="menu-fab" onclick="openGameMenu()" title="Menu">☰</button>
+<div id="mp-pill"><span class="dot"></span><span id="mp-pill-text">Sam</span></div>
+
+<div id="game-menu">
+  <h2>⏸️ Pauza</h2>
+  <button class="gm-btn" onclick="closeGameMenu()">▶️ Wróć do gry</button>
+  <div id="gm-mp-status">Grasz sam</div>
+  <input id="gm-secret" type="text" maxlength="24" placeholder="hasło pokoju" autocomplete="off" spellcheck="false">
+  <button class="gm-btn secondary" id="gm-connect-btn" onclick="mpToggleConnect()">🔗 Połącz</button>
+  <button class="gm-btn ghost" onclick="exitToIntro()">🏠 Menu główne</button>
+</div>
+
+<div id="emote-bar"></div>
 
 <canvas id="minimap" width="160" height="160"></canvas>
 <div id="version-badge"></div>
@@ -413,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 65, label: 'Pasażer siedzi w siodle' };
+const GAME_VERSION = { number: 66, label: 'Wspólna jazda (multiplayer)' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7217,7 +7301,9 @@ const Camera = {
 // ========== GAME LOOP ==========
 function update() {
   const dt = Math.min(clock.getDelta(), 0.05);
-  const input = getInput();
+  // While a full-screen UI overlay (game menu / main menu) is up, freeze player
+  // control but keep the world — and remote riders — rendering underneath.
+  const input = uiPaused ? { forward: 0, turn: 0, turnIntent: 0, moving: false } : getInput();
 
   // Sprint mechanic: hold Left Shift while moving forward, consumes stamina.
   // Hysteresis: hitting empty locks sprinting off until stamina recovers past
@@ -7478,6 +7564,8 @@ function update() {
     window.__fpsFrames = 0;
     window.__fpsStart = performance.now();
   }
+
+  mpTick(dt);
 
   updateFpsMeter();
   requestAnimationFrame(update);
@@ -7831,6 +7919,358 @@ function spawnConfetti(pos) {
 }
 
 // ========== STATE PERSISTENCE (hot reload) ==========
+// ========================================================================
+// MULTIPLAYER (Trystero serverless P2P over WebRTC)
+// ------------------------------------------------------------------------
+// Kids ride together in a shared "room". No server of ours: peers find each
+// other through public signalling relays (only an encrypted handshake passes
+// through them), then talk directly, browser-to-browser, DTLS-encrypted. The
+// room secret both names the room and encrypts the traffic, so only families
+// who share the same word meet — and even then the payload is opaque to relays.
+//
+// Scope of this prototype: we sync POSITIONS + EMOTES only. Each player keeps
+// their own world, challenges, coins and inventory locally (persisted as
+// before). World state is NOT shared yet — that's the open problem to solve
+// next; riding around together and waving is the honest first step.
+// ------------------------------------------------------------------------
+let uiPaused = false;                         // true while a menu overlay is up
+
+const MP = {
+  APP_ID: 'konik-matematyczny-p2p-v1',
+  TRYSTERO_URL: 'https://esm.sh/trystero@0.21.4/nostr',
+  status: 'off',        // off | connecting | connected
+  room: null,
+  sendState: null, sendEmote: null,
+  peers: {},            // peerId -> { group, mixer, acts, label, model, coat, tag, curAnim, target, cur, last }
+  secret: '',
+  tag: '🐴',
+  _send: 0,             // throttle accumulator
+  _emotes: [],          // floating emote sprites in flight
+};
+
+const MP_EMOJIS = ['👋','❤️','⭐','😀','🎉','🏇'];
+const MP_TAGS   = ['🐴','🦄','🐎','🦓','🐕','🐈','🦊','🐰','🐻','🐼','🦁','🐯'];
+
+// stable per-device identity emoji so a returning player looks the same
+function mpMyTag() {
+  let t = localStorage.getItem('konikMpTag');
+  if (!t) { t = MP_TAGS[Math.floor(Math.random() * MP_TAGS.length)]; localStorage.setItem('konikMpTag', t); }
+  return t;
+}
+
+// ---- coat textures for remote horses (cached, applied when ready) ----
+const _mpCoatTex = {}, _mpCoatPending = {};
+function mpApplyCoatTo(root, coat) {
+  if (!root) return;
+  const apply = (tex) => {
+    root.traverse(ch => {
+      if (!ch.isMesh || !ch.material) return;
+      const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+      mats.forEach(m => {
+        if ((m.name || '').toLowerCase() === 'horse') { m.map = tex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
+      });
+    });
+  };
+  if (_mpCoatTex[coat]) { apply(_mpCoatTex[coat]); return; }
+  (_mpCoatPending[coat] = _mpCoatPending[coat] || []).push(apply);
+  if (_mpCoatPending[coat].length > 1) return;   // a load for this coat is already in flight
+  new THREE.TextureLoader().load(`models/horse_coat_${coat}.webp`,
+    (t) => { t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; _mpCoatTex[coat] = t; (_mpCoatPending[coat] || []).forEach(fn => fn(t)); _mpCoatPending[coat] = []; },
+    undefined, () => { _mpCoatPending[coat] = []; });   // missing file → keep the model's own texture
+}
+
+function mpMakeLabel(txt) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  x.font = '92px serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(txt, 64, 70);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false }));
+  s.scale.set(2, 2, 2);
+  return s;
+}
+
+// Build a remote rider's horse — mirrors createHorse's auto-fit, minus gameplay.
+function mpMakeRemoteHorse(coat, tag) {
+  const g = new THREE.Group();
+  const { model, mixer } = createAnimatedClone('horse_real', 1);
+  const acts = {};
+  if (model) {
+    model.updateMatrixWorld(true);
+    let box = new THREE.Box3().setFromObject(model);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    model.scale.setScalar(3.6 / maxDim);
+    model.rotation.y = HORSE_MODEL_YAW;
+    model.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(model);
+    model.position.y = -box.min.y;
+    model.traverse(ch => {
+      if (ch.isMesh) ch.castShadow = false;
+      const nm = (ch.name + ' ' + ((ch.material && ch.material.name) || '')).toLowerCase();
+      if (nm.includes('saddle') || nm.includes('bridle')) ch.visible = false;
+    });
+    mpApplyCoatTo(model, coat || 'white');
+    g.add(model);
+    if (mixer && modelAnimations.horse_real) {
+      for (const clip of modelAnimations.horse_real) acts[clip.name.replace(/.*\|/, '').toLowerCase()] = mixer.clipAction(clip);
+      const ALIAS = { idle: '1 ilde', gallop: 'gallop' };
+      for (const [w, h] of Object.entries(ALIAS)) if (!acts[w] && acts[h]) acts[w] = acts[h];
+      const a = acts.idle || Object.values(acts)[0];
+      if (a) a.play();
+    }
+  } else {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), new THREE.MeshStandardMaterial({ color: 0xd4a56a }));
+    body.position.y = 1; g.add(body);
+  }
+  const label = mpMakeLabel(tag || '🐴');
+  label.position.y = 4.2; g.add(label);
+  scene.add(g);
+  return { group: g, mixer, acts, model, label, curAnim: 'idle' };
+}
+
+function mpSetAnim(p, name) {
+  if (p.curAnim === name || !p.acts[name]) return;
+  const from = p.acts[p.curAnim], to = p.acts[name];
+  if (to) { to.reset().play(); if (from) from.crossFadeTo(to, 0.2, false); }
+  p.curAnim = name;
+}
+
+// ---- connection lifecycle ----
+async function mpConnect(secret) {
+  secret = (secret || '').trim();
+  if (!secret) { mpFlash('Wpisz hasło pokoju'); return; }
+  if (MP.room) mpDisconnect();
+  MP.secret = secret;
+  MP.tag = mpMyTag();
+  MP.status = 'connecting';
+  mpUpdateUI();
+  try {
+    const { joinRoom } = await import(MP.TRYSTERO_URL);
+    // roomId namespaced by the secret so only same-secret families meet;
+    // the same secret also encrypts the signalling handshake.
+    MP.room = joinRoom({ appId: MP.APP_ID, password: secret }, 'konik-' + secret);
+    const [sendState, getState] = MP.room.makeAction('st');
+    const [sendEmote, getEmote] = MP.room.makeAction('em');
+    MP.sendState = sendState; MP.sendEmote = sendEmote;
+    getState((data, id) => mpOnState(id, data));
+    getEmote((data, id) => mpOnEmote(id, data));
+    MP.room.onPeerJoin((id) => { mpFlash('Dołączył gracz!'); mpSendStateNow(); mpUpdateUI(); });
+    MP.room.onPeerLeave((id) => mpRemovePeer(id));
+    MP.status = 'connected';
+    localStorage.setItem('konikMpSecret', secret);
+    localStorage.setItem('konikMpAuto', '1');
+    mpUpdateUI();
+    mpSendStateNow();
+  } catch (e) {
+    console.error('MP connect failed', e);
+    MP.status = 'off'; MP.room = null;
+    mpFlash('Nie udało się połączyć');
+    mpUpdateUI();
+  }
+}
+
+function mpDisconnect() {
+  try { if (MP.room) MP.room.leave(); } catch {}
+  MP.room = null; MP.sendState = null; MP.sendEmote = null;
+  for (const id of Object.keys(MP.peers)) mpRemovePeer(id);
+  MP.status = 'off';
+  localStorage.setItem('konikMpAuto', '0');   // manual disconnect = don't auto-reconnect next time
+  mpUpdateUI();
+}
+
+function mpToggleConnect() {
+  if (MP.status === 'connected' || MP.status === 'connecting') { mpDisconnect(); return; }
+  const el = document.getElementById('gm-secret');
+  mpConnect(el ? el.value : MP.secret);
+}
+
+function mpRemovePeer(id) {
+  const p = MP.peers[id]; if (!p) return;
+  if (p.mixer) { const i = animationMixers.indexOf(p.mixer); if (i >= 0) animationMixers.splice(i, 1); }
+  if (p.group) scene.remove(p.group);
+  delete MP.peers[id];
+  mpUpdateUI();
+}
+
+// ---- inbound ----
+function mpOnState(id, d) {
+  if (!d || !window.__gameBuilt) return;
+  let p = MP.peers[id];
+  if (!p) {
+    p = mpMakeRemoteHorse(d.coat, d.tag);
+    p.coat = d.coat; p.tag = d.tag;
+    p.cur = { x: d.x, y: d.y, z: d.z, a: d.a };
+    p.group.position.set(d.x, d.y, d.z);
+    p.group.rotation.y = d.a;
+    MP.peers[id] = p;
+    mpUpdateUI();
+  }
+  // coat changed mid-session → re-skin
+  if (d.coat && d.coat !== p.coat) { p.coat = d.coat; mpApplyCoatTo(p.model, d.coat); }
+  p.target = { x: d.x, y: d.y, z: d.z, a: d.a, sp: d.sp || 0 };
+  p.last = clock.elapsedTime;
+}
+
+function mpOnEmote(id, d) {
+  const p = MP.peers[id];
+  if (p) mpFloatEmote(p.group, d && d.e);
+}
+
+// ---- outbound ----
+function mpSendStateNow() {
+  if (!MP.sendState) return;
+  MP.sendState({
+    x: horsePos.x, y: horsePos.y, z: horsePos.z,
+    a: horseAngle, sp: horseSpeed,
+    coat: coatSkin, tag: MP.tag,
+  });
+}
+
+function mpSendEmote(e) {
+  mpFloatEmote(horseGroup, e);         // show above my own horse too
+  if (MP.sendEmote) MP.sendEmote({ e });
+}
+
+// ---- per-frame ----
+function mpTick(dt) {
+  // broadcast my state at ~12 Hz while connected
+  if (MP.sendState) {
+    MP._send += dt;
+    if (MP._send >= 0.08) { MP._send = 0; mpSendStateNow(); }
+  }
+  const now = clock.elapsedTime;
+  for (const id of Object.keys(MP.peers)) {
+    const p = MP.peers[id];
+    if (p.last != null && now - p.last > 10) { mpRemovePeer(id); continue; }  // gone quiet → drop
+    if (p.target && p.cur) {
+      const k = 1 - Math.pow(0.001, dt);   // smooth exponential follow (~frame-rate independent)
+      p.cur.x += (p.target.x - p.cur.x) * k;
+      p.cur.y += (p.target.y - p.cur.y) * k;
+      p.cur.z += (p.target.z - p.cur.z) * k;
+      let da = p.target.a - p.cur.a;
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
+      p.cur.a += da * k;
+      p.group.position.set(p.cur.x, p.cur.y, p.cur.z);
+      p.group.rotation.y = p.cur.a;
+      mpSetAnim(p, Math.abs(p.target.sp) > 1.2 ? 'gallop' : 'idle');
+    }
+  }
+  // float emotes upward + fade
+  for (let i = MP._emotes.length - 1; i >= 0; i--) {
+    const em = MP._emotes[i]; em.t += dt;
+    em.sprite.position.y = em.baseY + em.t * 1.6;
+    em.sprite.material.opacity = Math.max(0, 1 - em.t / 1.6);
+    if (em.t >= 1.6) { if (em.group) em.group.remove(em.sprite); MP._emotes.splice(i, 1); }
+  }
+}
+
+function mpFloatEmote(group, e) {
+  if (!group || !e) return;
+  const s = mpMakeLabel(e);
+  s.scale.set(2.4, 2.4, 2.4);
+  s.position.y = 5.2;
+  group.add(s);
+  MP._emotes.push({ sprite: s, group, t: 0, baseY: 5.2 });
+}
+
+// ---- UI glue ----
+function mpBuildEmoteBar() {
+  const bar = document.getElementById('emote-bar');
+  if (!bar || bar.children.length) return;
+  for (const e of MP_EMOJIS) {
+    const b = document.createElement('button');
+    b.className = 'emote-btn'; b.textContent = e;
+    b.onclick = () => mpSendEmote(e);
+    bar.appendChild(b);
+  }
+}
+
+let _mpFlashTimer = 0;
+function mpFlash(msg) {
+  const el = document.getElementById('gm-mp-status');
+  if (!el) return;
+  el.textContent = msg;
+  clearTimeout(_mpFlashTimer);
+  _mpFlashTimer = setTimeout(mpUpdateUI, 2200);
+}
+
+function mpUpdateUI() {
+  const n = Object.keys(MP.peers).length;
+  const pill = document.getElementById('mp-pill');
+  const pillText = document.getElementById('mp-pill-text');
+  const status = document.getElementById('gm-mp-status');
+  const cbtn = document.getElementById('gm-connect-btn');
+  const bar = document.getElementById('emote-bar');
+  const connected = MP.status === 'connected';
+  const connecting = MP.status === 'connecting';
+  if (pill) {
+    pill.classList.toggle('show', window.__gameBuilt);
+    pill.classList.toggle('on', connected);
+    pill.classList.toggle('connecting', connecting);
+    if (pillText) pillText.textContent = connected ? (n > 0 ? `${n} obok` : 'Pokój') : connecting ? '...' : 'Sam';
+  }
+  if (status) {
+    status.textContent = connecting ? 'Łączenie…'
+      : connected ? (n > 0 ? `W pokoju • ${n} obok Ciebie` : 'W pokoju • czekasz na innych')
+      : 'Grasz sam';
+  }
+  if (cbtn) cbtn.textContent = (connected || connecting) ? '🔌 Rozłącz' : '🔗 Połącz';
+  if (bar) bar.classList.toggle('show', connected && !uiPaused);
+}
+
+// pull the secret/auto choice from the intro screen into MP + storage
+function mpApplyIntroSecret() {
+  const s = document.getElementById('mp-secret-input');
+  const a = document.getElementById('mp-auto-input');
+  if (s && s.value.trim()) { MP.secret = s.value.trim(); localStorage.setItem('konikMpSecret', MP.secret); }
+  if (a) localStorage.setItem('konikMpAuto', a.checked ? '1' : '0');
+  const gm = document.getElementById('gm-secret');
+  if (gm && MP.secret) gm.value = MP.secret;
+}
+
+function mpAutoConnect() {
+  if (localStorage.getItem('konikMpAuto') === '1') {
+    const s = localStorage.getItem('konikMpSecret') || MP.secret;
+    if (s) mpConnect(s);
+  }
+}
+
+// prefill the intro inputs from last time so "both PCs auto-connect" just works
+function mpInitIntroInputs() {
+  const s = document.getElementById('mp-secret-input');
+  const a = document.getElementById('mp-auto-input');
+  if (s) s.value = localStorage.getItem('konikMpSecret') || '';
+  if (a) a.checked = localStorage.getItem('konikMpAuto') === '1';
+}
+
+// ---- game-menu / main-menu overlays ----
+window.openGameMenu = function () {
+  uiPaused = true;
+  const gm = document.getElementById('gm-secret');
+  if (gm && MP.secret && !gm.value) gm.value = MP.secret;
+  document.getElementById('game-menu').classList.add('show');
+  mpUpdateUI();
+};
+window.closeGameMenu = function () {
+  uiPaused = false;
+  document.getElementById('game-menu').classList.remove('show');
+  mpUpdateUI();
+};
+window.exitToIntro = function () {
+  try { saveState(); } catch {}
+  uiPaused = true;
+  document.getElementById('game-menu').classList.remove('show');
+  document.getElementById('menu-fab').classList.remove('show');
+  document.getElementById('mp-pill').classList.remove('show');
+  document.getElementById('emote-bar').classList.remove('show');
+  const btn = document.getElementById('btn-play');
+  if (btn) { btn.textContent = 'WRÓĆ DO GRY'; btn.disabled = false; }
+  document.getElementById('intro').style.display = '';
+};
+window.mpToggleConnect = mpToggleConnect;
+
 function saveState() {
   // Serialize active challenges
   const savedChallenges = challenges.filter(c => c.active).map(ch => ({
@@ -7874,7 +8314,17 @@ function resetGame() {
 
 window.startGame = async function () {
   const introEl = document.getElementById('intro');
-  const btn = introEl.querySelector('button');
+  // Returning to an already-built game (came back from the main menu): the whole
+  // scene still exists, so just unhide it and unpause — no reload, instant resume.
+  if (window.__gameBuilt) {
+    introEl.style.display = 'none';
+    uiPaused = false;
+    document.getElementById('menu-fab').classList.add('show');
+    mpApplyIntroSecret();
+    mpUpdateUI();
+    return;
+  }
+  const btn = document.getElementById('btn-play');
   btn.textContent = 'Loading models...';
   btn.disabled = true;
 
@@ -7964,8 +8414,19 @@ window.startGame = async function () {
   window.addEventListener('pagehide', saveState);
   document.addEventListener('visibilitychange', () => { if (document.hidden) saveState(); });
 
+  window.__gameBuilt = true;
+  document.getElementById('menu-fab').classList.add('show');
+  mpBuildEmoteBar();
+  mpApplyIntroSecret();     // pull the secret typed on the intro screen
+  mpUpdateUI();
+  mpAutoConnect();          // reconnect automatically if the family enabled it
+
   update();
 };
+
+// Prefill the multiplayer room field from last time (so two home PCs that both
+// ticked "auto-połącz" reconnect to each other on their own at startup).
+mpInitIntroInputs();
 
 // Auto-start if we're hot-reloading
 const savedState = loadState();
