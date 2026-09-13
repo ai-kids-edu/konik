@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 66, label: 'Wspólna jazda (multiplayer)' };
+const GAME_VERSION = { number: 67, label: 'Wspólny świat — te same bramki' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -5998,14 +5998,20 @@ function createHorse() {
 }
 
 // ========== CHALLENGES ==========
-function createChallenge() {
+// Split so multiplayer can generate challenge DATA on the host and build the
+// identical meshes on every peer. `makeChallengeData` = pure data (position +
+// problem + shuffled answers, all JSON-serializable); `buildChallengeFromData`
+// = the 3D gate. Solo play just chains them, exactly as before.
+let _chSeq = 0;
+function makeChallengeData(anchorX, anchorZ) {
+  if (anchorX === undefined) { anchorX = horsePos.x; anchorZ = horsePos.z; }
   let cx, cz;
   // Find a spot away from trees and not in water (try up to 20 times)
   for (let attempt = 0; attempt < 20; attempt++) {
     const dist = 15 + Math.random() * 30;
     const angle = Math.random() * Math.PI * 2;
-    cx = horsePos.x + Math.cos(angle) * dist;
-    cz = horsePos.z + Math.sin(angle) * dist;
+    cx = anchorX + Math.cos(angle) * dist;
+    cz = anchorZ + Math.sin(angle) * dist;
     // Stay on land, within bounds
     if (cz > waterStartZ(cx) - 5 || Math.abs(cx) > 85 || cz < CITY_SOUTH_EDGE + 20) continue;
     // Keep challenges off the road corridor (kids drive down road, gate blocks path)
@@ -6046,6 +6052,24 @@ function createChallenge() {
   const { question, answer } = problemData;
   const wrongAnswers = generateWrongAnswers(answer);
   const answers = [answer, ...wrongAnswers].sort(() => Math.random() - 0.5);
+
+  return {
+    id: 'c' + (++_chSeq) + '_' + (MP.selfId || MP.session),
+    cx, cz, question, answer, answers,
+    pd: { a: problemData.a, b: problemData.b, type: problemData.type, useVisual: problemData.useVisual, dotColor: problemData.dotColor },
+  };
+}
+
+function createChallenge() {
+  return buildChallengeFromData(makeChallengeData());
+}
+
+function buildChallengeFromData(data) {
+  const cx = data.cx, cz = data.cz;
+  const question = data.question, answer = data.answer;
+  const answers = data.answers;
+  // Rebuild the problemData the sign/bucket dot-renderers read from.
+  const problemData = { question, answer, a: data.pd.a, b: data.pd.b, type: data.pd.type, useVisual: data.pd.useVisual, dotColor: data.pd.dotColor };
 
   const group = new THREE.Group();
   const challengeY = getTerrainHeight(cx, cz);
@@ -6297,7 +6321,7 @@ function createChallenge() {
   const challenge = {
     group, position: new THREE.Vector3(cx, challengeY, cz),
     question, answer, hayPiles, active: true, revealed: false,
-    problemData,
+    problemData, id: data.id,
   };
   challenges.push(challenge);
   return challenge;
@@ -7348,12 +7372,18 @@ function update() {
 
   Camera.follow(dt);
 
-  // Challenge management
-  challengeCooldown -= dt;
-  if (challengeCooldown <= 0) {
-    let activeCount = 0;
-    for (const c of challenges) if (c.active) activeCount++;
-    if (activeCount < 3) { createChallenge(); challengeCooldown = 2; }
+  // Challenge management. Solo: spawn locally as before. Multiplayer: the host
+  // owns the shared gate set (see mpWorldTick); clients never spawn — they only
+  // mirror the host's snapshot, so both kids see the same gates in the same spot.
+  if (!mpConnected()) {
+    challengeCooldown -= dt;
+    if (challengeCooldown <= 0) {
+      let activeCount = 0;
+      for (const c of challenges) if (c.active) activeCount++;
+      if (activeCount < 3) { createChallenge(); challengeCooldown = 2; }
+    }
+  } else {
+    mpWorldTick(dt);
   }
 
   // Check proximity to challenges
@@ -7443,15 +7473,19 @@ function update() {
   updateCheetah(dt);
   updateBlueTiger(dt);
 
-  // Remove far-away challenges (2D distance)
-  for (let i = challenges.length - 1; i >= 0; i--) {
-    const ch = challenges[i];
-    if (!ch.active) continue;
-    const fdx = horsePos.x - ch.position.x, fdz = horsePos.z - ch.position.z;
-    const dist = Math.sqrt(fdx * fdx + fdz * fdz);
-    if (dist > 80) {
-      scene.remove(ch.group);
-      challenges.splice(i, 1);
+  // Remove far-away challenges (2D distance). Skipped in multiplayer: gates are
+  // shared, so a peer wandering off must NOT delete a gate the host still owns —
+  // the host's snapshot is the only thing that adds or removes shared gates.
+  if (!mpConnected()) {
+    for (let i = challenges.length - 1; i >= 0; i--) {
+      const ch = challenges[i];
+      if (!ch.active) continue;
+      const fdx = horsePos.x - ch.position.x, fdz = horsePos.z - ch.position.z;
+      const dist = Math.sqrt(fdx * fdx + fdz * fdz);
+      if (dist > 80) {
+        scene.remove(ch.group);
+        challenges.splice(i, 1);
+      }
     }
   }
 
@@ -7717,6 +7751,11 @@ function handleAnswer(challenge, pile) {
 
   if (pile.correct) {
     challenge.active = false;
+    // Multiplayer: tell the host this shared gate is solved. The host removes it
+    // from the world and tops up, so it vanishes for everyone and a fresh gate
+    // appears. Mark _localSolved so my own reconcile leaves the mesh alone until
+    // the local eat-the-carrots celebration below finishes fading it out.
+    if (mpConnected()) { challenge._localSolved = true; mpRequestSolve(challenge.id); }
     carrots++;
     correctAnswers++;
     totalAnswers++;
@@ -7941,12 +7980,28 @@ const MP = {
   status: 'off',        // off | connecting | connected
   room: null,
   sendState: null, sendEmote: null,
+  sendWorld: null, sendSolve: null, sendPick: null,
   peers: {},            // peerId -> { group, mixer, acts, label, model, coat, tag, curAnim, target, cur, last }
   secret: '',
   tag: '🐴',
+  session: Math.random().toString(36).slice(2, 8),  // unique per tab, so pre-connect gate ids never collide between peers
+  selfId: '',
+  hostId: '',           // id of the current authoritative host (min peer id)
+  world: null,          // host-authoritative shared world (challenges, apples, level, seq)
   _send: 0,             // throttle accumulator
+  _worldDirty: false,   // host: world changed, needs a broadcast
+  _worldSend: 0,        // host: broadcast throttle accumulator
   _emotes: [],          // floating emote sprites in flight
 };
+
+// ---- host election: lowest id among (self + peers) simulates the world ----
+function mpAllIds() { return [MP.selfId, ...Object.keys(MP.peers)].filter(Boolean); }
+function mpRecomputeHost() {
+  const ids = mpAllIds().sort();
+  MP.hostId = ids.length ? ids[0] : '';
+}
+function mpIsHost() { return MP.status === 'connected' && MP.selfId && MP.hostId === MP.selfId; }
+function mpConnected() { return MP.status === 'connected'; }
 
 const MP_EMOJIS = ['👋','❤️','⭐','😀','🎉','🏇'];
 const MP_TAGS   = ['🐴','🦄','🐎','🦓','🐕','🐈','🦊','🐰','🐻','🐼','🦁','🐯'];
@@ -8046,18 +8101,38 @@ async function mpConnect(secret) {
   MP.status = 'connecting';
   mpUpdateUI();
   try {
-    const { joinRoom } = await import(MP.TRYSTERO_URL);
+    const { joinRoom, selfId } = await import(MP.TRYSTERO_URL);
+    MP.selfId = selfId;
     // roomId namespaced by the secret so only same-secret families meet;
     // the same secret also encrypts the signalling handshake.
     MP.room = joinRoom({ appId: MP.APP_ID, password: secret }, 'konik-' + secret);
     const [sendState, getState] = MP.room.makeAction('st');
     const [sendEmote, getEmote] = MP.room.makeAction('em');
+    const [sendWorld, getWorld] = MP.room.makeAction('wd');   // host → all: shared-world snapshot
+    const [sendSolve, getSolve] = MP.room.makeAction('sv');   // client → host: I answered a gate
+    const [sendPick,  getPick]  = MP.room.makeAction('pk');   // client → host: I took a collectible
     MP.sendState = sendState; MP.sendEmote = sendEmote;
+    MP.sendWorld = sendWorld; MP.sendSolve = sendSolve; MP.sendPick = sendPick;
     getState((data, id) => mpOnState(id, data));
     getEmote((data, id) => mpOnEmote(id, data));
-    MP.room.onPeerJoin((id) => { mpFlash('Dołączył gracz!'); mpSendStateNow(); mpUpdateUI(); });
-    MP.room.onPeerLeave((id) => mpRemovePeer(id));
+    getWorld((data, id) => mpOnWorld(id, data));
+    getSolve((data, id) => mpOnSolve(id, data));
+    getPick((data, id) => mpOnPick(id, data));
+    MP.room.onPeerJoin((id) => {
+      mpFlash('Dołączył gracz!');
+      mpSendStateNow();
+      mpRecomputeHost();
+      if (mpIsHost()) mpBroadcastWorld(true);   // hand the newcomer the current world
+      mpUpdateUI();
+    });
+    MP.room.onPeerLeave((id) => {
+      mpRemovePeer(id);
+      const wasHost = mpIsHost();
+      mpRecomputeHost();
+      if (!wasHost && mpIsHost()) mpHostAdopt();  // host left → I take over the world I last saw
+    });
     MP.status = 'connected';
+    mpRecomputeHost();
     localStorage.setItem('konikMpSecret', secret);
     localStorage.setItem('konikMpAuto', '1');
     mpUpdateUI();
@@ -8073,8 +8148,10 @@ async function mpConnect(secret) {
 function mpDisconnect() {
   try { if (MP.room) MP.room.leave(); } catch {}
   MP.room = null; MP.sendState = null; MP.sendEmote = null;
+  MP.sendWorld = null; MP.sendSolve = null; MP.sendPick = null;
   for (const id of Object.keys(MP.peers)) mpRemovePeer(id);
-  MP.status = 'off';
+  MP.status = 'off'; MP.hostId = ''; MP.world = null;   // gates on screen stay as this player's own solo world
+  challengeCooldown = 2;                                 // resume local spawning gently
   localStorage.setItem('konikMpAuto', '0');   // manual disconnect = don't auto-reconnect next time
   mpUpdateUI();
 }
@@ -8174,6 +8251,145 @@ function mpFloatEmote(group, e) {
   group.add(s);
   MP._emotes.push({ sprite: s, group, t: 0, baseY: 5.2 });
 }
+
+// ========================================================================
+// SHARED WORLD (host-authoritative math-gate synchronisation)
+// The host owns the canonical gate set; every peer renders exactly it, so both
+// kids see the same problems in the same places. Solving is validated by the
+// host: a solved gate is removed for everyone and a fresh one takes its place.
+// Personal state (coins, inventory, own level) stays local, as the family asked.
+// ------------------------------------------------------------------------
+const MP_TARGET_GATES = 4;
+
+function mpChallengeToData(ch) {
+  return {
+    id: ch.id, cx: ch.position.x, cz: ch.position.z,
+    question: ch.question, answer: ch.answer,
+    answers: ch.hayPiles.map(p => p.answer),
+    pd: { a: ch.problemData.a, b: ch.problemData.b, type: ch.problemData.type, useVisual: ch.problemData.useVisual, dotColor: ch.problemData.dotColor },
+  };
+}
+
+// Host: seed the canonical world from whatever gates already exist locally.
+function mpEnsureWorld() {
+  if (MP.world) return;
+  MP.world = { challenges: challenges.filter(c => c.active).map(mpChallengeToData), level };
+}
+
+// A rider position to anchor new gates near, so they land where the action is.
+function mpAnchor() {
+  const pts = [{ x: horsePos.x, z: horsePos.z }];
+  for (const p of Object.values(MP.peers)) if (p.cur) pts.push({ x: p.cur.x, z: p.cur.z });
+  return pts[Math.floor(Math.random() * pts.length)];
+}
+
+// Make local `challenges[]` match a list of gate DATA (build missing, remove gone).
+function mpReconcileChallenges(list) {
+  const want = new Map(list.map(d => [d.id, d]));
+  // build any gate we don't have yet
+  for (const d of list) {
+    if (!challenges.some(c => c.id === d.id)) buildChallengeFromData(d);
+  }
+  // remove gates no longer in the world (but leave one mid-celebration alone —
+  // its own fade-out will clean it up)
+  for (let i = challenges.length - 1; i >= 0; i--) {
+    const c = challenges[i];
+    if (!c.id) continue;
+    if (!want.has(c.id) && !c._localSolved) {
+      scene.remove(c.group);
+      challenges.splice(i, 1);
+    }
+  }
+}
+
+function mpBroadcastWorld() {
+  if (!mpIsHost() || !MP.sendWorld || !MP.world) return;
+  MP.sendWorld({ challenges: MP.world.challenges, level: MP.world.level });
+  MP._worldDirty = false;
+}
+
+// Per-frame world upkeep (called from the spawn manager while connected).
+function mpWorldTick(dt) {
+  if (mpIsHost()) {
+    mpEnsureWorld();
+    MP.world.level = level;   // host's difficulty drives the shared gates
+    // top the gate set back up to target
+    while (MP.world.challenges.length < MP_TARGET_GATES) {
+      const a = mpAnchor();
+      const d = makeChallengeData(a.x, a.z);
+      MP.world.challenges.push(d);
+      buildChallengeFromData(d);   // host renders it immediately
+      MP._worldDirty = true;
+    }
+    mpReconcileChallenges(MP.world.challenges);
+    // broadcast: promptly on change, else a slow heartbeat for late-joiners
+    MP._worldSend += dt;
+    if (MP._worldDirty || MP._worldSend >= 1.0) {
+      if (MP._worldSend >= 1.0 || MP._worldDirty) mpBroadcastWorld();
+      MP._worldSend = 0;
+    }
+  } else if (MP.world) {
+    mpReconcileChallenges(MP.world.challenges);
+  }
+}
+
+// Host received the newest snapshot obligation OR a fresh client needs it.
+function mpOnWorld(id, d) {
+  if (!d) return;
+  // Split-brain guard: if two peers both think they're host (e.g. peer discovery
+  // arrived out of order), the one with the LOWER id wins. A snapshot from a
+  // lower-id peer means they are the rightful host — yield authority and adopt.
+  if (mpIsHost()) {
+    if (id && id < MP.selfId) MP.hostId = id;   // yield: I'm now a client
+    else return;                                // I'm the real host — ignore theirs
+  }
+  MP.world = { challenges: d.challenges || [], level: d.level || 1 };
+  mpReconcileChallenges(MP.world.challenges);
+  // reflect the shared difficulty on the HUD so gates and label agree
+  const lv = Math.min(Math.max(MP.world.level, 1), LEVELS.length);
+  const el = document.getElementById('level-display');
+  if (el) el.textContent = LEVELS[lv - 1].name;
+}
+
+// A gate was answered correctly. Client asks the host; host resolves + tops up.
+function mpRequestSolve(chId) {
+  if (mpIsHost()) mpResolveChallenge(chId);
+  else if (MP.sendSolve) MP.sendSolve({ id: chId });
+}
+function mpOnSolve(id, d) {
+  if (!mpIsHost() || !d) return;
+  mpResolveChallenge(d.id);
+}
+function mpResolveChallenge(chId) {
+  if (!MP.world) return;
+  const before = MP.world.challenges.length;
+  MP.world.challenges = MP.world.challenges.filter(c => c.id !== chId);
+  if (MP.world.challenges.length !== before) {
+    MP._worldDirty = true;
+    // if I'm the host and NOT the one celebrating, drop my mesh now
+    const mine = challenges.find(c => c.id === chId);
+    if (mine && !mine._localSolved) { mine.active = false; scene.remove(mine.group); challenges.splice(challenges.indexOf(mine), 1); }
+    mpBroadcastWorld();
+  }
+}
+
+// Host handover: I just became host — adopt the world I last mirrored (or seed
+// from my local gates) and start driving it.
+function mpHostAdopt() {
+  mpEnsureWorld();
+  mpFlash('Prowadzisz świat');
+  mpBroadcastWorld();
+}
+
+function mpOnPick() { /* collectibles stay personal — no shared pick sync */ }
+
+// debug handle (harmless): inspect sync state from the console
+window.__mp = () => ({
+  status: MP.status, host: mpIsHost(), self: MP.selfId, hostId: MP.hostId,
+  peers: Object.keys(MP.peers).length,
+  worldGates: MP.world ? MP.world.challenges.map(c => c.id) : null,
+  localGates: challenges.filter(c => c.active).map(c => c.id),
+});
 
 // ---- UI glue ----
 function mpBuildEmoteBar() {
