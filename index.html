@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 74, label: 'Dźwięki świata z odległości' };
+const GAME_VERSION = { number: 75, label: 'Siodlarnia i cichszy dźwięk' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -4571,6 +4571,123 @@ function buildTradingStand(x, z, itemKey = 'fajerwerki', label = null) {
   scene.add(group);
 }
 
+// ----- SADDLERY (siodlarnia): a proper western storefront, not just a stall.
+// The buy counter is kept exactly as before (same spot, same interaction); a wooden
+// facade with a false front, a shingled roof, and saddlery decor is built behind and
+// around it. Front faces west (the road), frontDX = -1, so +X is "behind".
+function buildSaddlery(x, z, itemKey = 'siodlo', label = 'SIODLARNIA') {
+  const frontDX = -1;
+  buildBuyCounter(x, z, frontDX, itemKey); // unchanged: keeps buying working
+
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  const wallMat = _mat(0xb07a44, 0.92);   // warm plank wall
+  const woodMat = _mat(0x8a6238, 0.9);
+  const darkWood = _mat(0x5a3a1f, 0.9);
+  const shingleMat = _mat(0x6b4a2a, 0.8);
+  const metalMat = _mat(0x9a9a9a, 0.5, 0.6);
+
+  const FW = 4.4;   // facade width (along Z)
+  const backX = 1.5; // behind the counter
+
+  // Facade wall behind the counter.
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.4, FW), wallMat);
+  wall.position.set(backX, 1.7, 0);
+  wall.castShadow = true; wall.receiveShadow = true;
+  group.add(wall);
+  // Horizontal plank lines (thin dark battens) for texture.
+  for (const py of [0.9, 1.7, 2.5]) {
+    const batten = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, FW), darkWood);
+    batten.position.set(backX, py, 0);
+    group.add(batten);
+  }
+  // False front — a raised flat parapet above the wall (the classic western look).
+  const parapet = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.2, FW), wallMat);
+  parapet.position.set(backX - 0.25, 4.0, 0);
+  group.add(parapet);
+  const parapetTrim = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.16, FW), darkWood);
+  parapetTrim.position.set(backX - 0.25, 4.6, 0);
+  group.add(parapetTrim);
+
+  // Shingled roof sloping down toward the front (customer side).
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.12, FW + 0.4), shingleMat);
+  roof.position.set(backX - 1.2, 3.55, 0);
+  roof.rotation.z = 0.26; // high at the wall, low at the front
+  roof.castShadow = true;
+  group.add(roof);
+
+  // Two front posts holding the roof edge, flanking the counter.
+  for (const pz of [-1.7, 1.7]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.2, 8), woodMat);
+    post.position.set(backX - 2.4, 1.6, pz);
+    group.add(post);
+  }
+
+  // Name board on the false front.
+  const sc = document.createElement('canvas');
+  sc.width = 512; sc.height = 128;
+  const c = sc.getContext('2d');
+  c.fillStyle = '#3a2208'; c.fillRect(0, 0, 512, 128);
+  c.strokeStyle = '#f6d990'; c.lineWidth = 8; c.strokeRect(6, 6, 500, 116);
+  c.fillStyle = '#f6ecd0'; c.font = 'bold 66px "Segoe UI",Arial,sans-serif';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(label, 256, 70);
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.4, 0.85),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, side: THREE.DoubleSide })
+  );
+  sign.position.set(backX - 0.42, 4.0, 0);
+  sign.rotation.y = -Math.PI / 2; // face west, toward the road
+  group.add(sign);
+
+  // Hanging saddle on the facade (decor identity).
+  const saddle = new THREE.Group();
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.7), _mat(0x7a4a24, 0.85));
+  saddle.add(seat);
+  const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), _mat(0x8a5a2c, 0.85));
+  pommel.position.set(-0.22, 0.16, 0); saddle.add(pommel);
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.9), _mat(0x6a3f1e, 0.85));
+  skirt.position.set(0.18, -0.12, 0); saddle.add(skirt);
+  saddle.position.set(backX - 0.18, 2.3, -0.9);
+  group.add(saddle);
+
+  // Two horseshoes nailed to the wall.
+  for (const pz of [0.7, 1.4]) {
+    const shoe = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.04, 8, 14, Math.PI * 1.35), metalMat);
+    shoe.position.set(backX - 0.17, 2.5, pz);
+    shoe.rotation.y = Math.PI / 2;
+    shoe.rotation.z = Math.PI;
+    group.add(shoe);
+  }
+
+  // Coiled rope hung by the door.
+  const rope = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.05, 8, 16), _mat(0xcaa46a, 0.95));
+  rope.position.set(backX - 0.17, 1.7, -1.6);
+  rope.rotation.y = Math.PI / 2;
+  group.add(rope);
+
+  // A little lantern glow by the sign.
+  const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 0.16),
+    new THREE.MeshStandardMaterial({ color: 0xffcf6a, emissive: 0xffb020, emissiveIntensity: 0.7 }));
+  lantern.position.set(backX - 0.5, 3.1, -1.9);
+  group.add(lantern);
+
+  // Hitching rail out front to "tie up" the horse.
+  const railZs = [-1.9, 1.9];
+  for (const pz of railZs) {
+    const rp = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.2, 8), darkWood);
+    rp.position.set(backX - 3.4, 0.6, pz);
+    group.add(rp);
+  }
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, railZs[1] - railZs[0], 8), woodMat);
+  rail.position.set(backX - 3.4, 1.05, 0);
+  rail.rotation.x = Math.PI / 2;
+  group.add(rail);
+
+  group.position.set(x, h, z);
+  scene.add(group);
+}
+
 // ----- POST OFFICE: small with mailbox out front, letter on facade -----
 function buildPost(x, z, side) {
   const w = 6, d = 5, hgt = 3.6;
@@ -5781,8 +5898,8 @@ function createFarm() {
     beacon: szBeacon, kind: 'stable', inZone: false,
   });
 
-  // Saddlery (siodlarnia): a small stall by the stable selling the saddle.
-  buildTradingStand(fx - 10, fz + 10, 'siodlo', 'SIODLARNIA');
+  // Saddlery (siodlarnia): a proper western storefront by the stable.
+  buildSaddlery(fx - 10, fz + 10, 'siodlo', 'SIODLARNIA');
 
   // Water trough (simple geometry — no GLB for this)
   const troughX = fx - 5, troughZ = fz + 2;
@@ -7718,7 +7835,8 @@ const Sfx = {
   muted: false,
   _stepAcc: 0,
   init() {
-    try { this.muted = localStorage.getItem('sfxMuted') === '1'; } catch {}
+    // Sound is OFF by default (opt-in via the speaker button); honor a saved choice.
+    try { const v = localStorage.getItem('sfxMuted'); this.muted = v === null ? true : v === '1'; } catch { this.muted = true; }
   },
   _ac() {
     if (!this.ctx) {
@@ -7730,7 +7848,7 @@ const Sfx = {
         comp.threshold.value = -16; comp.knee.value = 22; comp.ratio.value = 4;
         comp.attack.value = 0.003; comp.release.value = 0.25;
         this.master = this.ctx.createGain();
-        this.master.gain.value = 1.6;
+        this.master.gain.value = this.muted ? 0 : 1.6;
         this.master.connect(comp).connect(this.ctx.destination);
       } catch {}
     }
@@ -7863,7 +7981,7 @@ const Sfx = {
   },
   buildPositional() {
     if (this.pos.built || !this._ac()) return;
-    const sea = this._loopBed('lowpass', 550, 0.5, 0.5);   // surf: broadband, slow swell
+    const sea = this._loopBed('lowpass', 550, 0.5, 0.2);   // surf: broadband, slow swell
     const leaves = this._loopBed('bandpass', 3200, 0.8, 0.28); // rustling leaves: airy
     const farm = this._loopBed('lowpass', 300, 0.4, 0.12);  // low farmyard murmur bed
     this.pos = {
