@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 75, label: 'Siodlarnia i cichszy dźwięk' };
+const GAME_VERSION = { number: 76, label: 'Prawdziwe postacie 3D' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -572,6 +572,14 @@ const MODEL_MANIFEST = {
   palmtree: 'models/PalmTree.glb',
   // Grooming accessories
   bow: 'models/bow.glb', // Bowtie by jeremy (poly.pizza) CC BY 3.0 — stage-2 mane bow
+  // People — Quaternius Ultimate Animated Characters (CC0), rigged + 24 anims
+  // (Idle/Walk/Wave/...). Vertex-coloured, no textures, ~1.5 MB each.
+  person_farmer: 'models/person_farmer.glb',
+  person_adventurer: 'models/person_adventurer.glb',
+  person_king: 'models/person_king.glb',
+  person_casual_2: 'models/person_casual_2.glb',
+  person_casual_hoodie: 'models/person_casual_hoodie.glb',
+  person_beach: 'models/person_beach.glb',
 };
 
 async function loadAllModels(onProgress) {
@@ -2383,8 +2391,11 @@ function completePassengerDelivery(farmer) {
   if (farmer.mounted) {
     horseGroup.remove(farmer.group);
     scene.add(farmer.group);
-    farmer.group.scale.set(1.4, 1.4, 1.4);
+    farmer.group.position.y = getTerrainHeight(farmer.group.position.x, farmer.group.position.z);
+    farmer.group.rotation.set(0, farmer.group.rotation.y, 0);
+    farmer.group.scale.setScalar(farmer.baseScale || 1.4);
     farmer.mounted = false;
+    setPersonAnim(farmer, 'idle');
     if (ridingFarmer === farmer) ridingFarmer = null;
   }
   const destH = getTerrainHeight(q.destination.x, q.destination.z);
@@ -2416,9 +2427,10 @@ function updateWalkingNpcs(dt) {
     const g = f.group;
     const dx = f.homeX - g.position.x, dz = f.homeZ - g.position.z;
     const dist = Math.hypot(dx, dz);
-    if (dist < 0.5) { // arrived — stop and straighten the legs
+    if (dist < 0.5) { // arrived — stop, back to idle
       f.walkingHome = false;
       if (f.legPivots) for (const p of f.legPivots) p.rotation.x = 0;
+      setPersonAnim(f, 'idle');
       continue;
     }
     const ang = directionAngle(dx, dz);
@@ -2427,7 +2439,9 @@ function updateWalkingNpcs(dt) {
     g.position.x += Math.sin(ang) * step;
     g.position.z += Math.cos(ang) * step;
     g.position.y = getTerrainHeight(g.position.x, g.position.z);
-    if (f.legPivots) {
+    if (f.actions) {                 // rigged person — walk clip
+      setPersonAnim(f, 'walk');
+    } else if (f.legPivots) {        // primitive — swing the legs
       const sw = Math.sin(clock.elapsedTime * 8) * 0.5;
       f.legPivots[0].rotation.x = sw;
       f.legPivots[1].rotation.x = -sw;
@@ -6020,7 +6034,81 @@ function createFarmAnimal(type, x, z) {
   farmAnimals.push(animalData);
 }
 
+// ===== Rigged people (Quaternius Ultimate Animated Characters, CC0) =====
+const PERSON_HEIGHT = 2.4;   // on-ground height in metres (old primitives were ~2.5 at scale 1.4)
+const PERSON_YAW = Math.PI;  // facing offset so the model points along its heading (tuned in-game)
+// role / townType -> which character model, optional scale + body tint.
+const PERSON_LOOK = {
+  farmer:      { model: 'person_farmer' },
+  sheriff:     { model: 'person_adventurer' },
+  shopkeeper:  { model: 'person_casual_hoodie' },
+  merchant:    { model: 'person_beach' },
+  banker:      { model: 'person_king' },
+  blacksmith:  { model: 'person_farmer' },
+  kid:         { model: 'person_casual_2', scale: 0.8 },
+  hairdresser: { model: 'person_casual_2' },
+};
+
+function setPersonAnim(f, name) {
+  if (!f.actions || f.curAnim === name) return;
+  const next = f.actions[name] || f.actions.idle;
+  if (!next) return;
+  const prev = f.curAnim && f.actions[f.curAnim];
+  if (prev && prev !== next) prev.fadeOut(0.25);
+  next.reset().fadeIn(0.25).play();
+  f.curAnim = f.actions[name] ? name : 'idle';
+}
+
+// Build a rigged person; returns the farmer-record, or null if its model isn't
+// loaded (caller then falls back to the primitive builder).
+function createRiggedPerson(x, z, faceAngle, kind, look) {
+  const modelKey = look.model;
+  if (!loadedModels[modelKey]) return null;
+  const { model, mixer } = createAnimatedClone(modelKey, 1);
+  if (!model) return null;
+  // Own material instances (tinting one person must not bleed to its clones).
+  model.traverse(c => {
+    if (!c.isMesh || !c.material) return;
+    c.material = Array.isArray(c.material) ? c.material.map(m => m.clone()) : c.material.clone();
+    c.castShadow = false; c.receiveShadow = true;
+  });
+  // Auto-fit to a consistent height, feet on the ground (armature carries a big
+  // internal scale, so measure the rendered box like the horse does).
+  model.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3(); box.getSize(size);
+  model.scale.setScalar((PERSON_HEIGHT * (look.scale || 1)) / (size.y || 1));
+  model.rotation.y = PERSON_YAW;
+  model.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(model);
+  model.position.y = -box.min.y;
+
+  const h = getTerrainHeight(x, z);
+  const group = new THREE.Group();
+  group.position.set(x, h, z);
+  group.rotation.y = angleToRotationY(faceAngle);
+  group.add(model);
+  scene.add(group);
+
+  const actions = {};
+  if (mixer && modelAnimations[modelKey]) {
+    for (const clip of modelAnimations[modelKey]) {
+      actions[clip.name.replace(/.*\|/, '').toLowerCase()] = mixer.clipAction(clip);
+    }
+  }
+  const rec = { group, model, mixer, actions, curAnim: null, waving: false, waveTime: 0,
+                baseScale: 1, role: kind === 'farmer' ? 'farmer' : 'townsperson' };
+  if (kind !== 'farmer') rec.townType = kind;
+  farmers.push(rec);
+  if (actions.idle) { actions.idle.play(); rec.curAnim = 'idle'; }
+  return rec;
+}
+
 function createFarmer(x, z) {
+  if (createRiggedPerson(x, z, Math.random() * Math.PI * 2, 'farmer', PERSON_LOOK.farmer)) return;
+  createFarmerPrimitive(x, z);
+}
+function createFarmerPrimitive(x, z) {
   const h = getTerrainHeight(x, z);
   const group = new THREE.Group();
   group.position.set(x, h, z);
@@ -6105,12 +6193,16 @@ function createFarmer(x, z) {
 
   group.scale.set(1.4, 1.4, 1.4);
   scene.add(group);
-  farmers.push({ group, rightArmPivot, legPivots, waving: false, waveTime: 0, role: 'farmer' });
+  farmers.push({ group, rightArmPivot, legPivots, waving: false, waveTime: 0, baseScale: 1.4, role: 'farmer' });
 }
 
 // Townsperson — same pickup mechanic as farmer (added to `farmers` array).
 // `type`: 'sheriff' | 'shopkeeper' | 'merchant' | 'kid' | 'blacksmith' | 'banker'
 function createTownsperson(x, z, faceAngle, type) {
+  if (createRiggedPerson(x, z, faceAngle, type, PERSON_LOOK[type] || PERSON_LOOK.kid)) return;
+  createTownspersonPrimitive(x, z, faceAngle, type);
+}
+function createTownspersonPrimitive(x, z, faceAngle, type) {
   const h = getTerrainHeight(x, z);
   const group = new THREE.Group();
   group.position.set(x, h, z);
@@ -6296,7 +6388,7 @@ function createTownsperson(x, z, faceAngle, type) {
 
   group.scale.set(1.4 * personScale, 1.4 * personScale, 1.4 * personScale);
   scene.add(group);
-  farmers.push({ group, rightArmPivot, legPivots, waving: false, waveTime: 0, role: 'townsperson', townType: type });
+  farmers.push({ group, rightArmPivot, legPivots, waving: false, waveTime: 0, baseScale: 1.4, role: 'townsperson', townType: type });
 }
 
 let animalAnimTime = 0;
@@ -6378,19 +6470,22 @@ function animateFarmAnimals(dt) {
     const fdz = horsePos.z - fg.position.z;
     const fDist = Math.sqrt(fdx * fdx + fdz * fdz);
 
+    if (farmer.walkingHome) continue; // walker owns its own facing + anim
+
     if (fDist < 12) {
       const targetAngle = angleToRotationY(directionAngle(fdx, fdz));
       fg.rotation.y = lerpAngle(fg.rotation.y, targetAngle, dt * 3);
-
-      if (fDist < 6) {
-        farmer.waving = true;
-        farmer.waveTime += dt;
-        farmer.rightArmPivot.rotation.x = -2.5 + Math.sin(farmer.waveTime * 5) * 0.4;
-      } else {
-        farmer.waving = false;
-        farmer.rightArmPivot.rotation.x = THREE.MathUtils.lerp(farmer.rightArmPivot.rotation.x, 0, dt * 3);
+      const near = fDist < 6;
+      if (farmer.actions) {                      // rigged person — play a clip
+        setPersonAnim(farmer, near ? 'wave' : 'idle');
+      } else if (farmer.rightArmPivot) {         // primitive — swing the arm
+        if (near) { farmer.waving = true; farmer.waveTime += dt;
+          farmer.rightArmPivot.rotation.x = -2.5 + Math.sin(farmer.waveTime * 5) * 0.4;
+        } else { farmer.waving = false;
+          farmer.rightArmPivot.rotation.x = THREE.MathUtils.lerp(farmer.rightArmPivot.rotation.x, 0, dt * 3);
+        }
       }
-    } else {
+    } else if (farmer.rightArmPivot) {
       farmer.waving = false;
       farmer.rightArmPivot.rotation.x = THREE.MathUtils.lerp(farmer.rightArmPivot.rotation.x, 0, dt * 2);
     }
@@ -7644,10 +7739,11 @@ function handleSpaceAction() {
     const dropH = getTerrainHeight(dropX, dropZ);
     horseGroup.remove(farmer.group);
     farmer.group.position.set(dropX, dropH, dropZ);
-    farmer.group.rotation.y = angleToRotationY(horseAngle);
-    farmer.group.scale.set(1.4, 1.4, 1.4);
+    farmer.group.rotation.set(0, angleToRotationY(horseAngle), 0);
+    farmer.group.scale.setScalar(farmer.baseScale || 1.4);
     scene.add(farmer.group);
     farmer.mounted = false;
+    setPersonAnim(farmer, 'idle');
     return;
   }
 
@@ -7673,10 +7769,11 @@ function handleSpaceAction() {
     // bought saddle lifts them a touch so they sit in it.
     scene.remove(closest.group);
     const seatY = (inventory.siodlo || 0) > 0 ? 1.35 : 1.2;
-    closest.group.position.set(0, seatY, 0.45);
-    closest.group.rotation.set(-0.12, 0, 0);
-    closest.group.scale.set(1, 1, 1); // relative to horse scale
+    closest.group.position.set(0, seatY, 0.2);
+    closest.group.rotation.set(-0.12, Math.PI, 0); // face forward (where the horse goes)
+    closest.group.scale.setScalar(closest.baseScale || 1);
     horseGroup.add(closest.group);
+    setPersonAnim(closest, 'idle');
   }
 }
 
