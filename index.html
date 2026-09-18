@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 77, label: 'Skarb w jaskini: zbiera sie i znika' };
+const GAME_VERSION = { number: 78, label: 'Jaskinia wykuta w klifie' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -934,6 +934,24 @@ function getTerrainHeight(x, z) {
       return HIPPO._flatY * (1 - tb) + natural * tb;
     }
   }
+  // Carve the treasure cave as a real flat pocket cut into the rising east cliff:
+  // inside the footprint the floor stays low, so the cliff/plateau that would
+  // otherwise rise here becomes the cave's back and side walls.
+  if (typeof CAVE !== 'undefined' && CAVE.cx !== undefined) {
+    const ox = Math.abs(x - CAVE.cx) - CAVE.flatHalfX;
+    const oz = Math.abs(z - CAVE.cz) - CAVE.flatHalfZ;
+    const outside = Math.max(ox, oz, 0);
+    if (outside < 5) {
+      if (CAVE._flatY === undefined) CAVE._flatY = _terrainNatural(CAVE.cx - CAVE.flatHalfX - 2, CAVE.cz);  // meadow level just outside the mouth
+      if (outside <= 0) return CAVE._flatY;
+      const tb = outside / 5;
+      return CAVE._flatY * (1 - tb) + _terrainNatural(x, z) * tb;
+    }
+  }
+  return _terrainNatural(x, z);
+}
+
+function _terrainNatural(x, z) {
   const bsz = beachStartZ(x);
   const wsz = waterStartZ(x);
   // Beach & water zone: flatten toward water
@@ -2844,7 +2862,9 @@ function _hippoPlaque(n, live) {
 // ------------------------------------------------------------------------
 const CAVE = {
   // Carved into the east canyon cliff; the mouth opens west toward the meadow.
-  cx: 82, cz: -5,
+  // A flat pocket is cut into the terrain (flatHalf*), so the rising cliff around
+  // it becomes the cave's real back and side walls.
+  cx: 88, cz: -5, flatHalfX: 8.5, flatHalfZ: 9, _flatY: undefined,
   // A giant BALANCE SCALE puzzle: two pads on the left side, two on the right,
   // each carrying a boulder of some weight. Two different riders each step on a
   // pad on their side; the beam tips live. When the two chosen boulders weigh the
@@ -2857,7 +2877,7 @@ const CAVE = {
   ],
   padR: 2.6,
   scale: { x: 72, z: -5 }, panSpan: 6.5,
-  treasures: [{ x: 83, z: -8 }, { x: 83, z: -1 }],   // one per rider (clear of the boulder colliders)
+  treasures: [{ x: 89, z: -8 }, { x: 89, z: -2 }],   // one per rider, inside the pocket, clear of boulders
   grabR: 3.2,
   COOLDOWN: 300, baseY: 0, maxOpen: 90,
   group: null, pads: [], doorL: null, doorR: null,
@@ -2909,12 +2929,18 @@ function buildCave() {
   const g = new THREE.Group();
   C.baseY = getTerrainHeight(C.cx, C.cz);
 
-  // Boulders set INTO the east cliff, forming a mouth that opens west (-x).
+  // A tall, dense wall of boulders wrapping the back and both sides, leaving only
+  // the west mouth open — so it reads as a chamber cut into the rock.
   const ring = [
-    { x: 6, z: 0, s: 7.5 }, { x: 5, z: -5, s: 6.8 }, { x: 5, z: 5, s: 6.8 },
-    { x: 7, z: -4, s: 6.5 }, { x: 7, z: 4, s: 6.5 },
-    { x: 2, z: -8, s: 6.0 }, { x: 2, z: 8, s: 6.0 },
-    { x: -2, z: -8, s: 5.2 }, { x: -2, z: 8, s: 5.2 },
+    // back wall (east)
+    { x: 8, z: 0, s: 9.0 }, { x: 8, z: -5, s: 8.2 }, { x: 8, z: 5, s: 8.2 },
+    { x: 7, z: -9, s: 7.4 }, { x: 7, z: 9, s: 7.4 },
+    // side walls (north / south), front to back
+    { x: 4, z: -10, s: 7.2 }, { x: 4, z: 10, s: 7.2 },
+    { x: 0, z: -10, s: 6.6 }, { x: 0, z: 10, s: 6.6 },
+    { x: -3, z: -9, s: 6.0 }, { x: -3, z: 9, s: 6.0 },
+    // mouth flanks (frame the entrance)
+    { x: -4, z: -6, s: 5.4 }, { x: -4, z: 6, s: 5.4 },
   ];
   for (const r of ring) {
     const key = ((r.x + r.z) & 1) ? 'rock_1' : 'rock_2';
@@ -2937,6 +2963,20 @@ function buildCave() {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(C.cx + 2, C.baseY + 0.06, C.cz);
   g.add(floor);
+
+  // Rock ceiling so it's a real roofed chamber cut into the cliff (with a few
+  // stalactites). Sits above the gateway, over the interior only.
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 1 });
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(13, 1.4, 19), roofMat);
+  roof.position.set(C.cx + 1.5, C.baseY + 7.0, C.cz);
+  g.add(roof);
+  for (let i = 0; i < 7; i++) {
+    const h = 0.8 + Math.random() * 1.4;
+    const st = new THREE.Mesh(new THREE.ConeGeometry(0.35, h, 6), roofMat);
+    st.rotation.x = Math.PI;   // point down
+    st.position.set(C.cx - 2 + Math.random() * 9, C.baseY + 6.2 - h / 2, C.cz + (Math.random() - 0.5) * 12);
+    g.add(st);
+  }
 
   // Always-pretty crystal cluster at the back — glows even during cooldown.
   const crystal = new THREE.Group();
