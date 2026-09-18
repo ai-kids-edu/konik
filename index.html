@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 71, label: 'Odblokuj dźwięk na starcie' };
+const GAME_VERSION = { number: 72, label: 'Waga we dwoje — brama do jaskini' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2829,26 +2829,71 @@ function _hippoPlaque(n, live) {
 const CAVE = {
   // Carved into the east canyon cliff; the mouth opens west toward the meadow.
   cx: 82, cz: -5,
-  pad1: { x: 72, z: -9 }, pad2: { x: 72, z: -1 }, padR: 2.8,
-  treasure: { x: 84, z: -5 }, grabR: 3.2,
-  COOLDOWN: 300,                 // seconds the cave stays empty after a grab
-  baseY: 0,
-  group: null, door: null, pad1Mesh: null, pad2Mesh: null,
-  treasureGroup: null, gem: null, crystal: null, doorCollider: null,
-  state: 'closed',               // closed | open | cooldown  (authoritative on host/solo)
-  until: 0,                      // host clock time the cooldown ends
-  _grabbing: false,
+  // A giant BALANCE SCALE puzzle: two pads on the left side, two on the right,
+  // each carrying a boulder of some weight. Two different riders each step on a
+  // pad on their side; the beam tips live. When the two chosen boulders weigh the
+  // SAME the beam levels and the gate swings open — the one matching pair. Then
+  // it stays open until BOTH have gone in, taken their own treasure, and come
+  // back out; then it shuts for a cooldown and a fresh puzzle appears.
+  padDefs: [
+    { x: 70, z: -12, side: 'L' }, { x: 76, z: -12, side: 'L' },
+    { x: 70, z: 2, side: 'R' }, { x: 76, z: 2, side: 'R' },
+  ],
+  padR: 2.6,
+  scale: { x: 72, z: -5 }, panSpan: 6.5,
+  treasures: [{ x: 85, z: -8 }, { x: 85, z: -2 }],   // one per rider
+  grabR: 3.2,
+  COOLDOWN: 300, baseY: 0, maxOpen: 90,
+  group: null, pads: [], doorL: null, doorR: null,
+  beam: null, panL: null, panR: null, panLBoulder: null, panRBoulder: null,
+  treasureGroup: null, gems: [], crystal: null, doorCollider: null,
+  puzzle: { weights: [2, 4, 4, 5] },   // per-pad boulder weights; exactly one L/R pair is equal
+  state: 'closed', until: 0, openId: 0,
+  _session: null,          // host: { riders:Set, entered:Set, done:Set, t0 }
+  _grabbedOpen: -1,        // local: the openId I've already collected my treasure for
+  _beamAngle: 0,
 };
 
-function caveStoneMat() { return new THREE.MeshStandardMaterial({ color: 0x6b6f78, roughness: 0.95 }); }
+const CAVE_ROCK_COL = 0x8a8f98;
+function caveWeightRadius(w) { return 0.45 + w * 0.16; }
+function caveBoulder(w) {
+  const m = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(caveWeightRadius(w), 0),
+    new THREE.MeshStandardMaterial({ color: CAVE_ROCK_COL, roughness: 0.9, flatShading: true })
+  );
+  m.rotation.set(Math.random(), Math.random(), Math.random());
+  return m;
+}
+
+// Generate a balance puzzle: weights[L0,L1,R0,R1] where exactly one left/right
+// pair is equal. m,lx,ry distinct guarantees a single matching pair.
+function caveGenPuzzle() {
+  const pick = (excl) => { let v; do { v = 2 + Math.floor(Math.random() * 6); } while (excl.includes(v)); return v; };  // 2..7
+  const m = pick([]), lx = pick([m]), ry = pick([m, lx]);
+  const mL = Math.random() < 0.5 ? 0 : 1, mR = Math.random() < 0.5 ? 0 : 1;
+  const L = mL === 0 ? [m, lx] : [lx, m];
+  const R = mR === 0 ? [m, ry] : [ry, m];
+  return { weights: [L[0], L[1], R[0], R[1]] };
+}
+
+// Paint the puzzle: put a correctly-sized boulder on each pad.
+function caveApplyPuzzle(p) {
+  CAVE.puzzle = p;
+  CAVE.pads.forEach((pad, i) => {
+    pad.weight = p.weights[i];
+    if (pad.boulder) pad.group.remove(pad.boulder);
+    const b = caveBoulder(pad.weight);
+    b.position.set(pad.x, pad.y + caveWeightRadius(pad.weight) + 0.1, pad.z);
+    pad.group.add(b); pad.boulder = b;
+  });
+}
 
 function buildCave() {
   const C = CAVE;
   const g = new THREE.Group();
   C.baseY = getTerrainHeight(C.cx, C.cz);
 
-  // Boulders set INTO the east cliff, forming a mouth that opens west (-x)
-  // toward the meadow. Offsets: +x = deeper into the cliff, ±z = the two sides.
+  // Boulders set INTO the east cliff, forming a mouth that opens west (-x).
   const ring = [
     { x: 6, z: 0, s: 7.5 }, { x: 5, z: -5, s: 6.8 }, { x: 5, z: 5, s: 6.8 },
     { x: 7, z: -4, s: 6.5 }, { x: 7, z: 4, s: 6.5 },
@@ -2864,15 +2909,14 @@ function buildCave() {
       rock.rotation.y = Math.random() * Math.PI * 2;
       brightenModel(rock, 1.35);
       g.add(rock);
-      // every boulder blocks the horse; the mouth (x≈cx-3, |z|<3.6) stays clear
       barnColliders.push({ minX: rx - 2.2, maxX: rx + 2.2, minZ: rz - 2.2, maxZ: rz + 2.2 });
     }
   }
 
-  // Dark cave floor just inside the mouth.
+  // Polished stone floor inside (cool blue, faintly lit — not muddy).
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(6, 24),
-    new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 1 })
+    new THREE.CircleGeometry(6.5, 32),
+    new THREE.MeshStandardMaterial({ color: 0x556c86, emissive: 0x1b2c3f, emissiveIntensity: 0.5, roughness: 0.35, metalness: 0.2 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(C.cx + 2, C.baseY + 0.06, C.cz);
@@ -2881,70 +2925,125 @@ function buildCave() {
   // Always-pretty crystal cluster at the back — glows even during cooldown.
   const crystal = new THREE.Group();
   const crCols = [0x7ce8ff, 0xb98cff, 0x8affd0];
-  for (let i = 0; i < 5; i++) {
-    const h = 1.4 + Math.random() * 1.6;
+  for (let i = 0; i < 6; i++) {
+    const h = 1.6 + Math.random() * 1.8;
     const cr = new THREE.Mesh(
-      new THREE.ConeGeometry(0.35 + Math.random() * 0.25, h, 5),
-      new THREE.MeshStandardMaterial({ color: crCols[i % 3], emissive: crCols[i % 3], emissiveIntensity: 0.8, roughness: 0.3, metalness: 0.1 })
+      new THREE.ConeGeometry(0.35 + Math.random() * 0.28, h, 5),
+      new THREE.MeshStandardMaterial({ color: crCols[i % 3], emissive: crCols[i % 3], emissiveIntensity: 1.0, roughness: 0.25, metalness: 0.15 })
     );
-    cr.position.set(C.cx + 6 + (Math.random() - 0.5) * 1.5, C.baseY + h / 2, C.cz + (Math.random() - 0.5) * 2.4);
-    cr.rotation.z = (Math.random() - 0.5) * 0.3;
+    cr.position.set(C.cx + 6 + (Math.random() - 0.5) * 2, C.baseY + h / 2, C.cz + (Math.random() - 0.5) * 3);
+    cr.rotation.z = (Math.random() - 0.5) * 0.35;
     crystal.add(cr);
   }
   g.add(crystal);
   C.crystal = crystal;
 
-  // Magic door across the west-facing mouth (thin in x) — lifts away on open.
-  const door = new THREE.Mesh(
-    new THREE.BoxGeometry(0.4, 4.4, 7.2),
-    new THREE.MeshStandardMaterial({ color: 0x9be7ff, emissive: 0x49b6ff, emissiveIntensity: 0.7, transparent: true, opacity: 0.55, roughness: 0.2, metalness: 0.3 })
-  );
-  door.position.set(C.cx - 3, C.baseY + 2.2, C.cz);
-  g.add(door);
-  C.door = door;
-  C.doorCollider = { minX: C.cx - 4, maxX: C.cx - 2, minZ: C.cz - 3.6, maxZ: C.cz + 3.6 };
-  barnColliders.push(C.doorCollider);   // blocks entry while shut
+  // === Stone archway + two swinging wooden doors ===============
+  const stone = () => new THREE.MeshStandardMaterial({ color: 0x8b8f98, roughness: 0.9 });
+  const gx = C.cx - 3;   // mouth plane
+  for (const sz of [-4.2, 4.2]) {   // two pillars
+    const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.85, 6.2, 10), stone());
+    pil.position.set(gx, C.baseY + 3.1, C.cz + sz);
+    g.add(pil);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), new THREE.MeshStandardMaterial({ color: 0x9be7ff, emissive: 0x49b6ff, emissiveIntensity: 1.1, roughness: 0.3 }));
+    cap.position.set(gx, C.baseY + 6.4, C.cz + sz);
+    g.add(cap);
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.1, 10.4), stone());
+  lintel.position.set(gx, C.baseY + 6.0, C.cz);
+  g.add(lintel);
 
-  // Two glowing pads a rider must stand on together.
-  const mkPad = (p, col) => {
-    const pad = new THREE.Group();
+  const woodMat = () => new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 0.75 });
+  const bandMat = () => new THREE.MeshStandardMaterial({ color: 0x3a3f47, metalness: 0.7, roughness: 0.4 });
+  const runeMat = () => new THREE.MeshStandardMaterial({ color: 0x9be7ff, emissive: 0x49b6ff, emissiveIntensity: 1.2, roughness: 0.3 });
+  const makeLeaf = (hingeZ, dir) => {
+    // hinge at the pillar; leaf reaches to the centre. dir = +1 (spans +z) / -1
+    const hinge = new THREE.Group();
+    hinge.position.set(gx, C.baseY + 2.9, C.cz + hingeZ);
+    const leaf = new THREE.Group();
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.45, 5.4, 3.7), woodMat());
+    plank.position.set(0, 0, dir * 1.95);
+    leaf.add(plank);
+    for (const yy of [-1.6, 1.6]) {   // iron bands
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.35, 3.6), bandMat());
+      band.position.set(0, yy, dir * 1.95); leaf.add(band);
+    }
+    const rune = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 8, 18), runeMat());
+    rune.rotation.y = Math.PI / 2; rune.position.set(-0.25, 0, dir * 1.95); leaf.add(rune);
+    hinge.add(leaf);
+    g.add(hinge);
+    return hinge;
+  };
+  C.doorL = makeLeaf(-3.6, 1);
+  C.doorR = makeLeaf(3.6, -1);
+  C.doorCollider = { minX: gx - 0.6, maxX: gx + 0.6, minZ: C.cz - 3.9, maxZ: C.cz + 3.9 };
+  barnColliders.push(C.doorCollider);
+
+  // === Balance scale (centrepiece) =============================
+  const sx = C.scale.x, sByaw = getTerrainHeight(sx, C.cz);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 5.4, 12), new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.7 }));
+  post.position.set(sx, sByaw + 2.7, C.cz); g.add(post);
+  const beam = new THREE.Group(); beam.position.set(sx, sByaw + 5.2, C.cz);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, C.panSpan * 2 + 1.2), new THREE.MeshStandardMaterial({ color: 0x7a5a36, metalness: 0.3, roughness: 0.6 }));
+  beam.add(bar);
+  const mkPan = (dz) => {
+    const grp = new THREE.Group();
+    for (const cz2 of [-0.9, 0.9]) {
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6), bandMat());
+      chain.position.set(0, -1.1, dz + cz2 * 0); grp.add(chain);
+    }
+    const dish = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.2, 0.3, 16), new THREE.MeshStandardMaterial({ color: 0xcaa46a, metalness: 0.5, roughness: 0.4 }));
+    dish.position.set(0, -2.2, 0); grp.add(dish);
+    grp.position.set(0, 0, dz);
+    beam.add(grp);
+    return grp;
+  };
+  C.panL = mkPan(-C.panSpan);
+  C.panR = mkPan(C.panSpan);
+  g.add(beam); C.beam = beam;
+
+  // === Four pads with weight boulders ==========================
+  C.pads = [];
+  for (const p of C.padDefs) {
     const y = getTerrainHeight(p.x, p.z) + 0.08;
+    const col = p.side === 'L' ? 0x6ec8ff : 0xffb14a;
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(C.padR, 28),
-      new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.4, roughness: 0.5 })
+      new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.5, roughness: 0.5 })
     );
-    disc.rotation.x = -Math.PI / 2; disc.position.set(p.x, y, p.z);
-    pad.add(disc);
+    disc.rotation.x = -Math.PI / 2; disc.position.set(p.x, y, p.z); g.add(disc);
     const ring2 = new THREE.Mesh(
-      new THREE.TorusGeometry(C.padR, 0.16, 10, 28),
-      new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9, roughness: 0.4 })
+      new THREE.TorusGeometry(C.padR, 0.2, 12, 28),
+      new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.0, roughness: 0.4 })
     );
-    ring2.rotation.x = -Math.PI / 2; ring2.position.set(p.x, y + 0.02, p.z);
-    pad.add(ring2);
-    g.add(pad);
-    return disc;
-  };
-  C.pad1Mesh = mkPad(C.pad1, 0xffd54a);
-  C.pad2Mesh = mkPad(C.pad2, 0xff7ec4);
-
-  // Treasure (hidden until the gate opens): a spinning gem + a little food pile.
-  const tg = new THREE.Group();
-  tg.position.set(C.treasure.x, C.baseY, C.treasure.z);
-  const gem = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.9),
-    new THREE.MeshStandardMaterial({ color: 0xffe27a, emissive: 0xffb300, emissiveIntensity: 0.8, roughness: 0.15, metalness: 0.6 })
-  );
-  gem.position.y = 1.4; tg.add(gem); C.gem = gem;
-  for (let i = 0; i < 4; i++) {
-    const carrot = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.8, 8), new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 }));
-    carrot.rotation.z = Math.PI / 2; carrot.position.set(Math.cos(i) * 0.9, 0.25, Math.sin(i) * 0.9); tg.add(carrot);
+    ring2.rotation.x = -Math.PI / 2; ring2.position.set(p.x, y + 0.03, p.z); g.add(ring2);
+    // a soft vertical light beam that flares up when a rider is on the pad
+    const beamCol = new THREE.Mesh(
+      new THREE.CylinderGeometry(C.padR * 0.8, C.padR, 6, 20, 1, true),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.0, side: THREE.DoubleSide, depthWrite: false })
+    );
+    beamCol.position.set(p.x, y + 3, p.z); g.add(beamCol);
+    C.pads.push({ x: p.x, z: p.z, y, side: p.side, disc, ring: ring2, light: beamCol, group: g, boulder: null, weight: 0, baseCol: col });
   }
-  tg.visible = false;
-  g.add(tg);
-  C.treasureGroup = tg;
 
-  scene.add(g);
-  C.group = g;
+  // === Treasure: one gem per rider + food (shown while open) =====
+  const tg = new THREE.Group();
+  C.gems = [];
+  for (const t of C.treasures) {
+    const gem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.85),
+      new THREE.MeshStandardMaterial({ color: 0x8ff0ff, emissive: 0x2bd4ff, emissiveIntensity: 1.0, roughness: 0.1, metalness: 0.5 })
+    );
+    gem.position.set(t.x, C.baseY + 1.5, t.z); tg.add(gem); C.gems.push(gem);
+    for (let i = 0; i < 3; i++) {
+      const carrot = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 }));
+      carrot.rotation.z = Math.PI / 2; carrot.position.set(t.x + Math.cos(i * 2) * 0.8, C.baseY + 0.25, t.z + Math.sin(i * 2) * 0.8); tg.add(carrot);
+    }
+  }
+  tg.visible = false; g.add(tg); C.treasureGroup = tg;
+
+  scene.add(g); C.group = g;
+  caveApplyPuzzle(caveGenPuzzle());
 }
 
 function caveDoorBlock(on) {
@@ -2953,28 +3052,36 @@ function caveDoorBlock(on) {
   else if (!on && i >= 0) barnColliders.splice(i, 1);
 }
 
-// Host/solo: set the authoritative state; mirror + broadcast when hosting.
+// Host/solo: set the authoritative state (+ regen the puzzle when it re-locks),
+// then mirror + broadcast when hosting.
 function caveSetState(s, startCooldown) {
   CAVE.state = s;
   CAVE.until = startCooldown ? clock.elapsedTime + CAVE.COOLDOWN : 0;
+  if ((!mpConnected() || mpIsHost()) && s === 'closed') caveApplyPuzzle(caveGenPuzzle());
   if (mpConnected() && mpIsHost() && MP.world) {
-    MP.world.cave = { state: CAVE.state, until: CAVE.until };
+    MP.world.cave = { state: CAVE.state, until: CAVE.until, openId: CAVE.openId, weights: CAVE.puzzle.weights };
     MP._worldDirty = true;
     mpBroadcastWorld();
   }
 }
 
-// I drove onto the open treasure — reward me (personal) and ask the host to
-// close the cave for its cooldown.
-function caveGrabLocal() {
-  if (CAVE._grabbing) return;
-  CAVE._grabbing = true;
-  carrots += 3; money += 3;
+function caveOpen() {
+  CAVE.openId++;
+  const ids = ['me', ...Object.keys(MP.peers)];
+  CAVE._session = { riders: new Set(ids), entered: new Set(), done: new Set(), t0: clock.elapsedTime };
+  spawnConfetti({ x: CAVE.cx - 3, y: CAVE.baseY + 3, z: CAVE.cz });
+  caveSetState('open', false);
+}
+
+// I rode up to a treasure while the gate is open — claim MY own reward once.
+function caveClaimTreasure() {
+  if (CAVE._grabbedOpen === CAVE.openId) return;
+  CAVE._grabbedOpen = CAVE.openId;
+  inventory.diament = (inventory.diament || 0) + 1;   // the gem lands in your bag
+  money += 5;
   updateCarrotHUD();
-  spawnConfetti({ x: CAVE.treasure.x, y: 2.2, z: CAVE.treasure.z });
-  spawnCoinBurst(CAVE.treasure.x, CAVE.treasure.z, 12);
-  if (!mpConnected() || mpIsHost()) caveSetState('cooldown', true);
-  else if (MP.sendPick) MP.sendPick({ type: 'cave' });   // host will cooldown + broadcast
+  spawnConfetti({ x: horsePos.x, y: 2.2, z: horsePos.z });
+  spawnCoinBurst(horsePos.x, horsePos.z, 12);
 }
 
 const _cavePad2 = (r, p) => (r.x - p.x) * (r.x - p.x) + (r.z - p.z) * (r.z - p.z);
@@ -2983,45 +3090,70 @@ function updateCave(dt) {
   if (!C.group) return;
   const now = clock.elapsedTime;
 
-  // Every rider's position (me + interpolated remote peers).
+  // Every rider (me + interpolated remote peers).
   const riders = [{ x: horsePos.x, z: horsePos.z, id: 'me' }];
   for (const [id, p] of Object.entries(MP.peers)) if (p.cur) riders.push({ x: p.cur.x, z: p.cur.z, id });
 
-  const on1 = riders.filter(r => _cavePad2(r, C.pad1) < C.padR * C.padR);
-  const on2 = riders.filter(r => _cavePad2(r, C.pad2) < C.padR * C.padR);
-  const bothDistinct = on1.some(a => on2.some(b => a.id !== b.id));
+  // Which rider (if any) stands on each pad.
+  const occ = C.pads.map(pad => { const r = riders.find(r => _cavePad2(r, pad) < C.padR * C.padR); return r ? r.id : null; });
+  // The occupied pad on each side + its weight.
+  const li = [0, 1].find(i => occ[i]); const ri = [2, 3].find(i => occ[i]);
+  const leftLoad = li != null ? C.pads[li].weight : 0;
+  const rightLoad = ri != null ? C.pads[ri].weight : 0;
+  const twoRiders = li != null && ri != null && occ[li] !== occ[ri];
+  const balanced = twoRiders && leftLoad === rightLoad;
 
-  // pad glow (cosmetic, everywhere)
-  if (C.pad1Mesh) C.pad1Mesh.material.emissiveIntensity = on1.length ? 1.5 : 0.4;
-  if (C.pad2Mesh) C.pad2Mesh.material.emissiveIntensity = on2.length ? 1.5 : 0.4;
+  // Beam tips toward the heavier side (right heavier => +x rotation lowers +z end).
+  const targetAngle = THREE.MathUtils.clamp((rightLoad - leftLoad) * 0.09, -0.5, 0.5);
+  C._beamAngle += (targetAngle - C._beamAngle) * Math.min(1, dt * 5);
+  if (C.beam) C.beam.rotation.x = C._beamAngle;
 
-  // State transitions only run on the authority (host, or solo).
+  // Pad glow + light beams; green when a matching pair is standing.
+  C.pads.forEach((pad, i) => {
+    const on = occ[i] != null;
+    let col = pad.baseCol;
+    if (on && (i === li || i === ri) && twoRiders) col = balanced ? 0x54e08a : 0xff6b6b;
+    pad.disc.material.color.setHex(col); pad.disc.material.emissive.setHex(col);
+    pad.disc.material.emissiveIntensity = on ? 1.6 + Math.sin(now * 6) * 0.3 : 0.5;
+    pad.ring.material.color.setHex(col); pad.ring.material.emissive.setHex(col);
+    pad.light.material.color.setHex(col);
+    pad.light.material.opacity += ((on ? 0.28 : 0) - pad.light.material.opacity) * Math.min(1, dt * 6);
+  });
+
+  // ---- authoritative state machine (host, or solo) ----
   const authoritative = !mpConnected() || mpIsHost();
   if (authoritative) {
-    if (C.state === 'closed' && bothDistinct) caveSetState('open', false);
-    else if (C.state === 'cooldown' && now >= C.until) caveSetState('closed', false);
+    if (C.state === 'closed' && balanced) caveOpen();
+    else if (C.state === 'open' && C._session) {
+      const S = C._session;
+      const present = new Set(['me', ...Object.keys(MP.peers)]);
+      for (const id of [...S.riders]) if (!present.has(id)) S.riders.delete(id);   // someone left → don't wait on them
+      for (const r of riders) {
+        if (!S.riders.has(r.id)) continue;
+        if (r.x > C.cx - 1 && Math.abs(r.z - C.cz) < 6) S.entered.add(r.id);        // went inside
+        if (S.entered.has(r.id) && r.x < C.cx - 7) S.done.add(r.id);                 // came back out
+      }
+      const allDone = S.riders.size > 0 && [...S.riders].every(id => S.done.has(id));
+      if (allDone || now - S.t0 > C.maxOpen) caveSetState('cooldown', true);
+    } else if (C.state === 'cooldown' && now >= C.until) caveSetState('closed', false);
   }
 
-  // Anyone standing on the open treasure grabs it.
+  // ---- my own treasure (personal reward, once per opening) ----
   if (C.state === 'open') {
-    const dme = (horsePos.x - C.treasure.x) ** 2 + (horsePos.z - C.treasure.z) ** 2;
-    if (dme < C.grabR * C.grabR) caveGrabLocal();
-  } else {
-    C._grabbing = false;
+    for (const t of C.treasures) {
+      if ((horsePos.x - t.x) ** 2 + (horsePos.z - t.z) ** 2 < C.grabR * C.grabR) { caveClaimTreasure(); break; }
+    }
   }
 
-  // Render from state.
+  // ---- render doors + treasure + crystal ----
   const open = C.state === 'open';
-  if (C.door) {
-    const targetY = C.baseY + (open ? 6.4 : 2.2);
-    C.door.position.y += (targetY - C.door.position.y) * Math.min(1, dt * 4);
-    C.door.material.opacity += ((open ? 0 : 0.55) - C.door.material.opacity) * Math.min(1, dt * 4);
-    C.door.material.emissiveIntensity = 0.6 + Math.sin(now * 3) * 0.2;
-  }
+  const t = open ? 1 : 0;
+  if (C.doorL) C.doorL.rotation.y += ((t ? -1.55 : 0) - C.doorL.rotation.y) * Math.min(1, dt * 3);
+  if (C.doorR) C.doorR.rotation.y += ((t ? 1.55 : 0) - C.doorR.rotation.y) * Math.min(1, dt * 3);
   caveDoorBlock(!open);
-  if (C.treasureGroup) { C.treasureGroup.visible = open; if (open) C.treasureGroup.rotation.y += dt * 1.0; }
-  if (C.gem && open) C.gem.rotation.y += dt * 2;
-  if (C.crystal) C.crystal.children.forEach((c, i) => { c.material.emissiveIntensity = 0.7 + Math.sin(now * 2 + i) * 0.3; });
+  if (C.treasureGroup) C.treasureGroup.visible = open;
+  if (open) C.gems.forEach((gm, i) => { gm.rotation.y += dt * 2; gm.position.y = C.baseY + 1.5 + Math.sin(now * 2 + i) * 0.15; });
+  if (C.crystal) C.crystal.children.forEach((c, i) => { c.material.emissiveIntensity = 0.9 + Math.sin(now * 2 + i) * 0.3; });
 }
 
 function buildHippodrome() {
@@ -8683,7 +8815,7 @@ function mpEnsureWorld() {
   MP.world = {
     challenges: challenges.filter(c => c.active).map(mpChallengeToData),
     level,
-    cave: { state: CAVE.state, until: CAVE.until },
+    cave: { state: CAVE.state, until: CAVE.until, openId: CAVE.openId, weights: CAVE.puzzle.weights },
   };
 }
 
@@ -8715,10 +8847,10 @@ function mpReconcileChallenges(list) {
 
 function mpBroadcastWorld() {
   if (!mpIsHost() || !MP.sendWorld || !MP.world) return;
-  const cave = MP.world.cave || { state: CAVE.state, until: CAVE.until };
+  const cave = MP.world.cave || { state: CAVE.state, until: CAVE.until, openId: CAVE.openId, weights: CAVE.puzzle.weights };
   // send REMAINING cooldown seconds (host clocks aren't comparable across machines)
   const rem = cave.state === 'cooldown' ? Math.max(0, cave.until - clock.elapsedTime) : 0;
-  MP.sendWorld({ challenges: MP.world.challenges, level: MP.world.level, cave: { state: cave.state, rem } });
+  MP.sendWorld({ challenges: MP.world.challenges, level: MP.world.level, cave: { state: cave.state, rem, openId: cave.openId, weights: cave.weights } });
   MP._worldDirty = false;
 }
 
@@ -8767,7 +8899,9 @@ function mpOnWorld(id, d) {
   if (d.cave) {
     CAVE.state = d.cave.state;
     CAVE.until = clock.elapsedTime + (d.cave.rem || 0);
-    MP.world.cave = { state: CAVE.state, until: CAVE.until };
+    if (typeof d.cave.openId === 'number') CAVE.openId = d.cave.openId;
+    if (d.cave.weights && d.cave.weights.join(',') !== CAVE.puzzle.weights.join(',')) caveApplyPuzzle({ weights: d.cave.weights });
+    MP.world.cave = { state: CAVE.state, until: CAVE.until, openId: CAVE.openId, weights: CAVE.puzzle.weights };
   }
 }
 
@@ -8799,7 +8933,8 @@ function mpHostAdopt() {
   mpEnsureWorld();
   // I inherit the cave mid-cooldown without the original host's clock — restart
   // the timer so it still reliably refills (a little extra empty time is fine).
-  if (CAVE.state === 'cooldown') { CAVE.until = clock.elapsedTime + CAVE.COOLDOWN; MP.world.cave = { state: 'cooldown', until: CAVE.until }; }
+  if (CAVE.state === 'cooldown') CAVE.until = clock.elapsedTime + CAVE.COOLDOWN;
+  MP.world.cave = { state: CAVE.state, until: CAVE.until, openId: CAVE.openId, weights: CAVE.puzzle.weights };
   mpFlash('Prowadzisz świat');
   mpBroadcastWorld();
 }
