@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 72, label: 'Waga we dwoje — brama do jaskini' };
+const GAME_VERSION = { number: 73, label: 'Głośniejszy galop i tło' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7719,11 +7719,25 @@ const Sfx = {
     try { this.muted = localStorage.getItem('sfxMuted') === '1'; } catch {}
   },
   _ac() {
-    if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} }
+    if (!this.ctx) {
+      try {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        // Master chain: a gain for headroom + a compressor so effects hit loud and
+        // punchy without clipping when several fire at once.
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.value = -16; comp.knee.value = 22; comp.ratio.value = 4;
+        comp.attack.value = 0.003; comp.release.value = 0.25;
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 1.6;
+        this.master.connect(comp).connect(this.ctx.destination);
+      } catch {}
+    }
     return this.ctx;
   },
+  _out() { return this.master || (this.ctx && this.ctx.destination); },
   unlock() { const ac = this._ac(); if (ac && ac.state === 'suspended') ac.resume(); },
-  setMuted(m) { this.muted = m; try { localStorage.setItem('sfxMuted', m ? '1' : '0'); } catch {} },
+  setMuted(m) { this.muted = m; try { localStorage.setItem('sfxMuted', m ? '1' : '0'); } catch {}
+    if (this.master) this.master.gain.value = m ? 0 : 1.6; },
   _now() { const ac = this._ac(); return ac ? ac.currentTime : 0; },
   _ok() { const ac = this._ac(); return ac && !this.muted && ac.state === 'running'; },
   // One oscillator with a quick attack / exponential decay envelope.
@@ -7736,7 +7750,7 @@ const Sfx = {
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g).connect(ac.destination);
+    osc.connect(g).connect(this._out());
     osc.start(t0); osc.stop(t0 + dur + 0.02);
   },
   // A short filtered noise burst — crunch / splash / hoof clop.
@@ -7751,27 +7765,81 @@ const Sfx = {
     const g = ac.createGain();
     g.gain.setValueAtTime(peak, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(filt).connect(g).connect(ac.destination);
+    src.connect(filt).connect(g).connect(this._out());
     src.start(t0); src.stop(t0 + dur + 0.02);
   },
+  // A chord tone — two detuned oscillators for a fuller, less thin sound.
+  _chord(freq, t0, dur, type, peak) {
+    this._tone(freq, t0, dur, type, peak);
+    this._tone(freq * 1.005, t0, dur, type, peak * 0.6);
+  },
   success() { if (!this._ok()) return; const t = this._now();
-    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this._tone(f, t + i * 0.09, 0.18, 'triangle', 0.22)); },
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this._chord(f, t + i * 0.08, 0.22, 'triangle', 0.5)); },
   wrong() { if (!this._ok()) return; const t = this._now(); // gentle, low — never harsh (no punishment)
-    this._tone(330, t, 0.16, 'sine', 0.15, 260); this._tone(247, t + 0.14, 0.22, 'sine', 0.13, 196); },
+    this._tone(330, t, 0.18, 'sine', 0.4, 260); this._tone(247, t + 0.14, 0.24, 'sine', 0.34, 196); },
   munch() { if (!this._ok()) return; const t = this._now();
-    for (let i = 0; i < 3; i++) this._noise(t + i * 0.13, 0.09, { type: 'lowpass', freq: 500 + Math.random() * 300, peak: 0.12 }); },
-  splash() { if (!this._ok()) return; this._noise(this._now(), 0.35, { type: 'highpass', freq: 700, q: 0.5, peak: 0.18 }); },
+    for (let i = 0; i < 4; i++) this._noise(t + i * 0.11, 0.1, { type: 'lowpass', freq: 450 + Math.random() * 350, q: 1.0, peak: 0.32 }); },
+  splash() { if (!this._ok()) return; const t = this._now();
+    this._noise(t, 0.4, { type: 'highpass', freq: 600, q: 0.4, peak: 0.5 });
+    this._noise(t, 0.18, { type: 'bandpass', freq: 1400, q: 0.6, peak: 0.35 }); },
   levelUp() { if (!this._ok()) return; const t = this._now();
-    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => this._tone(f, t + i * 0.1, 0.22, 'triangle', 0.24)); },
-  // Rhythmic hoof clops, driven from the game loop by land speed. Faster gait =
-  // quicker clops; silent when standing or swimming (speed passed as 0).
+    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => this._chord(f, t + i * 0.1, 0.28, 'triangle', 0.55)); },
+  // A single woody hoof "tok": a pitched body that drops fast, plus a click transient.
+  _clop(t, gain = 0.55, pitch = 170) {
+    const ac = this._ac(); if (!ac) return;
+    const osc = ac.createOscillator(), g = ac.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(pitch, t);
+    osc.frequency.exponentialRampToValueAtTime(pitch * 0.5, t + 0.06);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    osc.connect(g).connect(this._out());
+    osc.start(t); osc.stop(t + 0.11);
+    this._noise(t, 0.025, { type: 'highpass', freq: 2600, q: 0.6, peak: gain * 0.5 });
+  },
+  // Hoofbeats driven from the game loop by land speed. Above the gallop threshold
+  // it plays the classic four-beat gallop cluster (da-da-da-DUM … rest); below, an
+  // even two-beat walk. Silent when standing or swimming (speed passed as 0).
   hoof(dt, speed) {
     if (!this._ok() || speed < 0.3) { this._stepAcc = 0; return; }
-    const interval = Math.max(0.18, 0.6 - speed * 0.045);
+    const gallop = speed > BASE_SPEED + 2;
+    const stride = gallop ? Math.max(0.42, 0.8 - speed * 0.02) : Math.max(0.55, 1.1 - speed * 0.05);
     this._stepAcc += dt;
-    if (this._stepAcc >= interval) {
+    if (this._stepAcc >= stride) {
       this._stepAcc = 0;
-      this._noise(this._now(), 0.06, { type: 'bandpass', freq: 200 + Math.random() * 80, q: 1.2, peak: 0.1 });
+      const t = this._now() + 0.001;
+      if (gallop) [0, 0.09, 0.19, 0.30].forEach((o, i) => this._clop(t + o, i === 3 ? 0.6 : 0.42, 155 + i * 8));
+      else [0, 0.26].forEach(o => this._clop(t + o, 0.45, 175));
+    }
+  },
+  // Gentle looping ambience: soft filtered-noise wind + occasional bird chirps.
+  ambient: { on: false, wind: null, gain: null, birdTimer: 0 },
+  startAmbient() {
+    const ac = this._ac(); if (!ac || this.ambient.on) return;
+    const n = ac.sampleRate * 2;
+    const buf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+    const filt = ac.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 420; filt.Q.value = 0.4;
+    const g = ac.createGain(); g.gain.value = 0.12;
+    src.connect(filt).connect(g).connect(this._out());
+    src.start();
+    this.ambient = { on: true, wind: src, gain: g, birdTimer: 1.5 };
+  },
+  // A short two-note bird chirp, scheduled at random intervals from the loop.
+  _chirp() {
+    if (!this._ok()) return;
+    const t = this._now(), base = 1800 + Math.random() * 900;
+    this._tone(base, t, 0.08, 'sine', 0.09, base * 1.25);
+    this._tone(base * 1.18, t + 0.09, 0.07, 'sine', 0.07, base * 1.4);
+  },
+  ambientTick(dt) {
+    if (!this.ambient.on || !this._ok()) return;
+    this.ambient.birdTimer -= dt;
+    if (this.ambient.birdTimer <= 0) {
+      this._chirp();
+      this.ambient.birdTimer = 3 + Math.random() * 6; // next chirp in 3–9s
     }
   },
   mountButton() {
@@ -7904,6 +7972,7 @@ function update() {
   if (sfxDeep && !sfxPrevDeep) Sfx.splash();
   sfxPrevDeep = sfxDeep;
   Sfx.hoof(dt, (sfxDeep || isEatingCarrots || isJumping) ? 0 : Math.abs(horseSpeed));
+  Sfx.ambientTick(dt);
 
   Camera.follow(dt);
 
@@ -9093,6 +9162,7 @@ function resetGame() {
 
 window.startGame = async function () {
   Sfx.unlock(); // this call runs inside the GRAJ click gesture — create+resume audio now
+  Sfx.startAmbient();
   const introEl = document.getElementById('intro');
   // Returning to an already-built game (came back from the main menu): the whole
   // scene still exists, so just unhide it and unpause — no reload, instant resume.
