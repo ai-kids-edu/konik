@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 70, label: 'Dźwięk i kamera' };
+const GAME_VERSION = { number: 71, label: 'Odblokuj dźwięk na starcie' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7658,6 +7658,7 @@ const Sfx = {
   },
 };
 Sfx.init();
+window.__sfx = Sfx; // debug: __sfx.ctx.state, __sfx.muted, __sfx.success()
 
 // 2D segment-vs-AABB (XZ plane) entry parameter, for camera occlusion. Returns the
 // fraction along p→q where the segment first enters rect `c` (slab method), or null
@@ -8956,6 +8957,7 @@ function resetGame() {
 }
 
 window.startGame = async function () {
+  Sfx.unlock(); // this call runs inside the GRAJ click gesture — create+resume audio now
   const introEl = document.getElementById('intro');
   // Returning to an already-built game (came back from the main menu): the whole
   // scene still exists, so just unhide it and unpause — no reload, instant resume.
