@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 76, label: 'Prawdziwe postacie 3D' };
+const GAME_VERSION = { number: 77, label: 'Skarb w jaskini: zbiera sie i znika' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2857,7 +2857,7 @@ const CAVE = {
   ],
   padR: 2.6,
   scale: { x: 72, z: -5 }, panSpan: 6.5,
-  treasures: [{ x: 85, z: -8 }, { x: 85, z: -2 }],   // one per rider
+  treasures: [{ x: 83, z: -8 }, { x: 83, z: -1 }],   // one per rider (clear of the boulder colliders)
   grabR: 3.2,
   COOLDOWN: 300, baseY: 0, maxOpen: 90,
   group: null, pads: [], doorL: null, doorR: null,
@@ -3090,14 +3090,27 @@ function caveOpen() {
 }
 
 // I rode up to a treasure while the gate is open — claim MY own reward once.
-function caveClaimTreasure() {
+function caveClaimTreasure(i) {
   if (CAVE._grabbedOpen === CAVE.openId) return;
   CAVE._grabbedOpen = CAVE.openId;
+  const gem = CAVE.gems[i];
+  // Collect it the same way apples/carrots are collected: rise-and-shrink away,
+  // confetti, a quick eating beat — so it reads like every other pickup.
+  if (gem) {
+    const sx = gem.scale.x, startY = gem.position.y, t0 = Date.now();
+    (function animGem() {
+      const t = (Date.now() - t0) / 450;
+      if (t < 1 && gem.visible) { gem.position.y = startY + t * 1.6; gem.scale.setScalar(sx * (1 - t)); requestAnimationFrame(animGem); }
+      else { gem.visible = false; gem.scale.setScalar(sx); gem.position.y = startY; }   // reset for next opening
+    })();
+    spawnConfetti({ x: gem.position.x, y: 2.2, z: gem.position.z });
+  }
   inventory.diament = (inventory.diament || 0) + 1;   // the gem lands in your bag
   money += 5;
   updateCarrotHUD();
-  spawnConfetti({ x: horsePos.x, y: 2.2, z: horsePos.z });
   spawnCoinBurst(horsePos.x, horsePos.z, 12);
+  playHorseAnimation('eating', 900);
+  isEatingCarrots = true; setTimeout(() => { isEatingCarrots = false; }, 900);
 }
 
 const _cavePad2 = (r, p) => (r.x - p.x) * (r.x - p.x) + (r.z - p.z) * (r.z - p.z);
@@ -3156,8 +3169,9 @@ function updateCave(dt) {
 
   // ---- my own treasure (personal reward, once per opening) ----
   if (C.state === 'open') {
-    for (const t of C.treasures) {
-      if ((horsePos.x - t.x) ** 2 + (horsePos.z - t.z) ** 2 < C.grabR * C.grabR) { caveClaimTreasure(); break; }
+    for (let i = 0; i < C.treasures.length; i++) {
+      const t = C.treasures[i];
+      if ((horsePos.x - t.x) ** 2 + (horsePos.z - t.z) ** 2 < C.grabR * C.grabR) { caveClaimTreasure(i); break; }
     }
   }
 
@@ -3168,7 +3182,10 @@ function updateCave(dt) {
   if (C.doorR) C.doorR.rotation.y += ((t ? 1.55 : 0) - C.doorR.rotation.y) * Math.min(1, dt * 3);
   caveDoorBlock(!open);
   if (C.treasureGroup) C.treasureGroup.visible = open;
-  if (open) C.gems.forEach((gm, i) => { gm.rotation.y += dt * 2; gm.position.y = C.baseY + 1.5 + Math.sin(now * 2 + i) * 0.15; });
+  if (open) {
+    if (C._gemsOpenId !== C.openId) { C._gemsOpenId = C.openId; C.gems.forEach(gm => gm.visible = true); }  // fresh opening → gems back
+    C.gems.forEach((gm, i) => { gm.rotation.y += dt * 2; gm.position.y = C.baseY + 1.5 + Math.sin(now * 2 + i) * 0.15; });
+  }
   if (C.crystal) C.crystal.children.forEach((c, i) => { c.material.emissiveIntensity = 0.9 + Math.sin(now * 2 + i) * 0.3; });
 }
 
