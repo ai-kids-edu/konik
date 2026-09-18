@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 68, label: 'Czarodziejska brama we dwoje' };
+const GAME_VERSION = { number: 69, label: 'NPC wracają pieszo do domu' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2172,13 +2172,19 @@ function assignNewPassengerQuest() {
   const target = 2;
   let guard = 0;
   while (activePassengerCount() < target && guard++ < 20) {
-    const candidates = farmers.filter(f => isTownsperson(f) && !f.quest && !f.mounted && !f.awayAt);
+    const candidates = farmers.filter(f => isTownsperson(f) && !f.quest && !f.mounted && !f.awayAt && !f.walkingHome);
     if (candidates.length === 0) break;
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
-    // Remember where this townsperson lives so they can be brought back later.
+    // Remember where this person lives so they can be brought back later. The
+    // home label follows the actual spot — farmers live at the farm, townsfolk in
+    // town — so "take me home" doesn't always say the town.
     if (pick.homeX == null) {
       pick.homeX = pick.group.position.x;
       pick.homeZ = pick.group.position.z;
+      const atFarm = Math.hypot(pick.homeX - FARM_X, pick.homeZ - FARM_Z) < FARM_RADIUS + 12;
+      pick.homeName = atFarm ? 'na farmę' : 'do miasteczka';
+      pick.homeHud = atFarm ? 'farma' : 'miasteczko';
+      pick.homeEmoji = atFarm ? '🚜' : '🏘️';
     }
     const dests = PASSENGER_DESTINATIONS.filter(d => {
       const dx = pick.group.position.x - d.x;
@@ -2203,10 +2209,17 @@ function updateReturnQuests() {
     if (!f.awayAt) continue;
     if (f.homeX == null) continue;
     if (clock.elapsedTime - f.awayAt < RETURN_DELAY_SECONDS) continue;
+    // Half the time they just walk home on foot; otherwise they wait for a ride
+    // (a "take me to town" quest) so the town doesn't slowly empty out.
+    if (Math.random() < 0.5) {
+      f.walkingHome = true;
+      f.awayAt = 0;
+      continue;
+    }
     const dest = {
-      name: 'do miasteczka',
-      hudName: 'miasteczko',
-      emoji: '🏘️',
+      name: f.homeName || 'do miasteczka',
+      hudName: f.homeHud || 'miasteczko',
+      emoji: f.homeEmoji || '🏘️',
       x: f.homeX,
       z: f.homeZ,
     };
@@ -2392,8 +2405,37 @@ function completePassengerDelivery(farmer) {
   assignNewPassengerQuest();
 }
 
+// Townsfolk/farmers who chose to walk home stroll back to their start spot on
+// foot, legs swinging, then stop. (The other half wait for a ride quest.)
+const NPC_WALK_SPEED = 1.8;
+function updateWalkingNpcs(dt) {
+  for (const f of farmers) {
+    if (!f.walkingHome || f.mounted || f.quest || f.homeX == null) continue;
+    const g = f.group;
+    const dx = f.homeX - g.position.x, dz = f.homeZ - g.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 0.5) { // arrived — stop and straighten the legs
+      f.walkingHome = false;
+      if (f.legPivots) for (const p of f.legPivots) p.rotation.x = 0;
+      continue;
+    }
+    const ang = directionAngle(dx, dz);
+    g.rotation.y = angleToRotationY(ang);
+    const step = Math.min(NPC_WALK_SPEED * dt, dist);
+    g.position.x += Math.sin(ang) * step;
+    g.position.z += Math.cos(ang) * step;
+    g.position.y = getTerrainHeight(g.position.x, g.position.z);
+    if (f.legPivots) {
+      const sw = Math.sin(clock.elapsedTime * 8) * 0.5;
+      f.legPivots[0].rotation.x = sw;
+      f.legPivots[1].rotation.x = -sw;
+    }
+  }
+}
+
 function updatePassengerQuests(dt) {
   updateReturnQuests();
+  updateWalkingNpcs(dt);
   const t = clock.elapsedTime * 6;
   for (const f of farmers) {
     if (!f.questMarker) continue;
@@ -5775,14 +5817,20 @@ function createFarmer(x, z) {
   hatTop.position.y = 1.77;
   group.add(hatTop);
 
-  // Legs (trousers) with pivots for walking
+  // Legs (trousers) on hip pivots so they can swing into a riding pose when mounted.
+  const legPivots = [];
   for (const side of [-0.08, 0.08]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0.8, side); // hip
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.055, 0.6, 8), S(0x554433));
-    leg.position.set(0, 0.5, side);
-    group.add(leg);
+    leg.position.set(0, -0.3, 0);
+    pivot.add(leg);
     const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.08, 0.14, 8), S(0x3a2510));
-    boot.position.set(0, 0.17, side);
-    group.add(boot);
+    boot.position.set(0, -0.63, 0);
+    pivot.add(boot);
+    pivot.userData.side = side;
+    group.add(pivot);
+    legPivots.push(pivot);
   }
 
   // Arms — right arm is stored for waving
@@ -5806,7 +5854,7 @@ function createFarmer(x, z) {
 
   group.scale.set(1.4, 1.4, 1.4);
   scene.add(group);
-  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0, role: 'farmer' });
+  farmers.push({ group, rightArmPivot, legPivots, waving: false, waveTime: 0, role: 'farmer' });
 }
 
 // Townsperson — same pickup mechanic as farmer (added to `farmers` array).
@@ -5960,14 +6008,21 @@ function createTownsperson(x, z, faceAngle, type) {
     group.add(tie);
   }
 
-  // Legs
+  // Legs on hip pivots (swing into a riding pose when mounted). A skirt (female
+  // townsfolk) hides the legs, so pivots are harmless there.
+  const legPivots = [];
   for (const side of [-0.08, 0.08]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0.8, side); // hip
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.055, 0.6, 8), S(T.trousers));
-    leg.position.set(0, 0.5, side);
-    group.add(leg);
+    leg.position.set(0, -0.3, 0);
+    pivot.add(leg);
     const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.08, 0.14, 8), S(0x3a2510));
-    boot.position.set(0, 0.17, side);
-    group.add(boot);
+    boot.position.set(0, -0.63, 0);
+    pivot.add(boot);
+    pivot.userData.side = side;
+    group.add(pivot);
+    legPivots.push(pivot);
   }
 
   // Arms — right pivots for waving
@@ -5990,7 +6045,7 @@ function createTownsperson(x, z, faceAngle, type) {
 
   group.scale.set(1.4 * personScale, 1.4 * personScale, 1.4 * personScale);
   scene.add(group);
-  farmers.push({ group, rightArmPivot, waving: false, waveTime: 0, role: 'townsperson', townType: type });
+  farmers.push({ group, rightArmPivot, legPivots, waving: false, waveTime: 0, role: 'townsperson', townType: type });
 }
 
 let animalAnimTime = 0;
