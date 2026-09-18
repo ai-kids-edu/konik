@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 67, label: 'Wspólny świat — te same bramki' };
+const GAME_VERSION = { number: 68, label: 'Czarodziejska brama we dwoje' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1060,6 +1060,7 @@ function initScene() {
     const z = (Math.random() - 0.5) * 130;
     if (z > beachStartZ(x) - 3) continue;
     if (inRoadCorridor(x, z)) continue;
+    if (Math.hypot(x - CAVE.cx, z - CAVE.cz) < 16) continue;   // keep the cave clearing clear
     const key = Math.random() > 0.5 ? 'rock_1' : 'rock_2';
     // Rocks ~0.3-0.5m
     const rock = cloneModel(key, 0.7 + Math.random() * 0.3);
@@ -1077,6 +1078,7 @@ function initScene() {
     const z = (Math.random() - 0.5) * 120;
     if (z > beachStartZ(x) - 8) continue;
     if (inRoadCorridor(x, z)) continue;
+    if (Math.hypot(x - CAVE.cx, z - CAVE.cz) < 16) continue;   // keep the cave clearing clear
     const key = Math.random() > 0.5 ? 'bush_1' : 'bush_2';
     // Bush ~1m (model 1.69→0.59)
     const bush = cloneModel(key, 0.59 + Math.random() * 0.2);
@@ -1115,6 +1117,8 @@ function initScene() {
     // Keep trees out of farm area
     const dfx = x - FARM_X, dfz = z - FARM_Z;
     if (Math.sqrt(dfx * dfx + dfz * dfz) < FARM_RADIUS + 5) continue;
+    // Keep the magic-cave clearing clear
+    if (Math.hypot(x - CAVE.cx, z - CAVE.cz) < 16) continue;
     treePositions.push({ x, z });
     createTree(x, z);
   }
@@ -1124,6 +1128,7 @@ function initScene() {
   createWildWestTown();
   buildHippodrome();
   hippoBuilt = true;
+  buildCave();   // two-player magic gate + treasure cave (east meadow)
   // Prairie trading stall (fajerwerki) — off to the side of the road
   buildTradingStand(45, -180);
 }
@@ -2769,6 +2774,212 @@ function _hippoPlaque(n, live) {
     new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true })
   );
   return m;
+}
+
+// ========================================================================
+// MAGIC GATE + TREASURE CAVE (a two-player-only collaboration)
+// The gate opens ONLY when two different riders stand on the two glowing pads
+// at once — a thing you literally cannot do alone. Behind it: a little cave
+// with a treasure. Grab it and the cave empties for 5 minutes, then refills;
+// a glowing crystal stays inside the whole time so it's never bare.
+// State is host-authoritative and synced through the shared-world snapshot.
+// ------------------------------------------------------------------------
+const CAVE = {
+  // Carved into the east canyon cliff; the mouth opens west toward the meadow.
+  cx: 82, cz: -5,
+  pad1: { x: 72, z: -9 }, pad2: { x: 72, z: -1 }, padR: 2.8,
+  treasure: { x: 84, z: -5 }, grabR: 3.2,
+  COOLDOWN: 300,                 // seconds the cave stays empty after a grab
+  baseY: 0,
+  group: null, door: null, pad1Mesh: null, pad2Mesh: null,
+  treasureGroup: null, gem: null, crystal: null, doorCollider: null,
+  state: 'closed',               // closed | open | cooldown  (authoritative on host/solo)
+  until: 0,                      // host clock time the cooldown ends
+  _grabbing: false,
+};
+
+function caveStoneMat() { return new THREE.MeshStandardMaterial({ color: 0x6b6f78, roughness: 0.95 }); }
+
+function buildCave() {
+  const C = CAVE;
+  const g = new THREE.Group();
+  C.baseY = getTerrainHeight(C.cx, C.cz);
+
+  // Boulders set INTO the east cliff, forming a mouth that opens west (-x)
+  // toward the meadow. Offsets: +x = deeper into the cliff, ±z = the two sides.
+  const ring = [
+    { x: 6, z: 0, s: 7.5 }, { x: 5, z: -5, s: 6.8 }, { x: 5, z: 5, s: 6.8 },
+    { x: 7, z: -4, s: 6.5 }, { x: 7, z: 4, s: 6.5 },
+    { x: 2, z: -8, s: 6.0 }, { x: 2, z: 8, s: 6.0 },
+    { x: -2, z: -8, s: 5.2 }, { x: -2, z: 8, s: 5.2 },
+  ];
+  for (const r of ring) {
+    const key = ((r.x + r.z) & 1) ? 'rock_1' : 'rock_2';
+    const rock = cloneModel(key, r.s);
+    if (rock) {
+      const rx = C.cx + r.x, rz = C.cz + r.z;
+      rock.position.set(rx, getTerrainHeight(rx, rz) - 0.4, rz);
+      rock.rotation.y = Math.random() * Math.PI * 2;
+      brightenModel(rock, 1.35);
+      g.add(rock);
+      // every boulder blocks the horse; the mouth (x≈cx-3, |z|<3.6) stays clear
+      barnColliders.push({ minX: rx - 2.2, maxX: rx + 2.2, minZ: rz - 2.2, maxZ: rz + 2.2 });
+    }
+  }
+
+  // Dark cave floor just inside the mouth.
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(6, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 1 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(C.cx + 2, C.baseY + 0.06, C.cz);
+  g.add(floor);
+
+  // Always-pretty crystal cluster at the back — glows even during cooldown.
+  const crystal = new THREE.Group();
+  const crCols = [0x7ce8ff, 0xb98cff, 0x8affd0];
+  for (let i = 0; i < 5; i++) {
+    const h = 1.4 + Math.random() * 1.6;
+    const cr = new THREE.Mesh(
+      new THREE.ConeGeometry(0.35 + Math.random() * 0.25, h, 5),
+      new THREE.MeshStandardMaterial({ color: crCols[i % 3], emissive: crCols[i % 3], emissiveIntensity: 0.8, roughness: 0.3, metalness: 0.1 })
+    );
+    cr.position.set(C.cx + 6 + (Math.random() - 0.5) * 1.5, C.baseY + h / 2, C.cz + (Math.random() - 0.5) * 2.4);
+    cr.rotation.z = (Math.random() - 0.5) * 0.3;
+    crystal.add(cr);
+  }
+  g.add(crystal);
+  C.crystal = crystal;
+
+  // Magic door across the west-facing mouth (thin in x) — lifts away on open.
+  const door = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 4.4, 7.2),
+    new THREE.MeshStandardMaterial({ color: 0x9be7ff, emissive: 0x49b6ff, emissiveIntensity: 0.7, transparent: true, opacity: 0.55, roughness: 0.2, metalness: 0.3 })
+  );
+  door.position.set(C.cx - 3, C.baseY + 2.2, C.cz);
+  g.add(door);
+  C.door = door;
+  C.doorCollider = { minX: C.cx - 4, maxX: C.cx - 2, minZ: C.cz - 3.6, maxZ: C.cz + 3.6 };
+  barnColliders.push(C.doorCollider);   // blocks entry while shut
+
+  // Two glowing pads a rider must stand on together.
+  const mkPad = (p, col) => {
+    const pad = new THREE.Group();
+    const y = getTerrainHeight(p.x, p.z) + 0.08;
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(C.padR, 28),
+      new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.4, roughness: 0.5 })
+    );
+    disc.rotation.x = -Math.PI / 2; disc.position.set(p.x, y, p.z);
+    pad.add(disc);
+    const ring2 = new THREE.Mesh(
+      new THREE.TorusGeometry(C.padR, 0.16, 10, 28),
+      new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9, roughness: 0.4 })
+    );
+    ring2.rotation.x = -Math.PI / 2; ring2.position.set(p.x, y + 0.02, p.z);
+    pad.add(ring2);
+    g.add(pad);
+    return disc;
+  };
+  C.pad1Mesh = mkPad(C.pad1, 0xffd54a);
+  C.pad2Mesh = mkPad(C.pad2, 0xff7ec4);
+
+  // Treasure (hidden until the gate opens): a spinning gem + a little food pile.
+  const tg = new THREE.Group();
+  tg.position.set(C.treasure.x, C.baseY, C.treasure.z);
+  const gem = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.9),
+    new THREE.MeshStandardMaterial({ color: 0xffe27a, emissive: 0xffb300, emissiveIntensity: 0.8, roughness: 0.15, metalness: 0.6 })
+  );
+  gem.position.y = 1.4; tg.add(gem); C.gem = gem;
+  for (let i = 0; i < 4; i++) {
+    const carrot = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.8, 8), new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 }));
+    carrot.rotation.z = Math.PI / 2; carrot.position.set(Math.cos(i) * 0.9, 0.25, Math.sin(i) * 0.9); tg.add(carrot);
+  }
+  tg.visible = false;
+  g.add(tg);
+  C.treasureGroup = tg;
+
+  scene.add(g);
+  C.group = g;
+}
+
+function caveDoorBlock(on) {
+  const i = barnColliders.indexOf(CAVE.doorCollider);
+  if (on && i < 0) barnColliders.push(CAVE.doorCollider);
+  else if (!on && i >= 0) barnColliders.splice(i, 1);
+}
+
+// Host/solo: set the authoritative state; mirror + broadcast when hosting.
+function caveSetState(s, startCooldown) {
+  CAVE.state = s;
+  CAVE.until = startCooldown ? clock.elapsedTime + CAVE.COOLDOWN : 0;
+  if (mpConnected() && mpIsHost() && MP.world) {
+    MP.world.cave = { state: CAVE.state, until: CAVE.until };
+    MP._worldDirty = true;
+    mpBroadcastWorld();
+  }
+}
+
+// I drove onto the open treasure — reward me (personal) and ask the host to
+// close the cave for its cooldown.
+function caveGrabLocal() {
+  if (CAVE._grabbing) return;
+  CAVE._grabbing = true;
+  carrots += 3; money += 3;
+  updateCarrotHUD();
+  spawnConfetti({ x: CAVE.treasure.x, y: 2.2, z: CAVE.treasure.z });
+  spawnCoinBurst(CAVE.treasure.x, CAVE.treasure.z, 12);
+  if (!mpConnected() || mpIsHost()) caveSetState('cooldown', true);
+  else if (MP.sendPick) MP.sendPick({ type: 'cave' });   // host will cooldown + broadcast
+}
+
+const _cavePad2 = (r, p) => (r.x - p.x) * (r.x - p.x) + (r.z - p.z) * (r.z - p.z);
+function updateCave(dt) {
+  const C = CAVE;
+  if (!C.group) return;
+  const now = clock.elapsedTime;
+
+  // Every rider's position (me + interpolated remote peers).
+  const riders = [{ x: horsePos.x, z: horsePos.z, id: 'me' }];
+  for (const [id, p] of Object.entries(MP.peers)) if (p.cur) riders.push({ x: p.cur.x, z: p.cur.z, id });
+
+  const on1 = riders.filter(r => _cavePad2(r, C.pad1) < C.padR * C.padR);
+  const on2 = riders.filter(r => _cavePad2(r, C.pad2) < C.padR * C.padR);
+  const bothDistinct = on1.some(a => on2.some(b => a.id !== b.id));
+
+  // pad glow (cosmetic, everywhere)
+  if (C.pad1Mesh) C.pad1Mesh.material.emissiveIntensity = on1.length ? 1.5 : 0.4;
+  if (C.pad2Mesh) C.pad2Mesh.material.emissiveIntensity = on2.length ? 1.5 : 0.4;
+
+  // State transitions only run on the authority (host, or solo).
+  const authoritative = !mpConnected() || mpIsHost();
+  if (authoritative) {
+    if (C.state === 'closed' && bothDistinct) caveSetState('open', false);
+    else if (C.state === 'cooldown' && now >= C.until) caveSetState('closed', false);
+  }
+
+  // Anyone standing on the open treasure grabs it.
+  if (C.state === 'open') {
+    const dme = (horsePos.x - C.treasure.x) ** 2 + (horsePos.z - C.treasure.z) ** 2;
+    if (dme < C.grabR * C.grabR) caveGrabLocal();
+  } else {
+    C._grabbing = false;
+  }
+
+  // Render from state.
+  const open = C.state === 'open';
+  if (C.door) {
+    const targetY = C.baseY + (open ? 6.4 : 2.2);
+    C.door.position.y += (targetY - C.door.position.y) * Math.min(1, dt * 4);
+    C.door.material.opacity += ((open ? 0 : 0.55) - C.door.material.opacity) * Math.min(1, dt * 4);
+    C.door.material.emissiveIntensity = 0.6 + Math.sin(now * 3) * 0.2;
+  }
+  caveDoorBlock(!open);
+  if (C.treasureGroup) { C.treasureGroup.visible = open; if (open) C.treasureGroup.rotation.y += dt * 1.0; }
+  if (C.gem && open) C.gem.rotation.y += dt * 2;
+  if (C.crystal) C.crystal.children.forEach((c, i) => { c.material.emissiveIntensity = 0.7 + Math.sin(now * 2 + i) * 0.3; });
 }
 
 function buildHippodrome() {
@@ -6020,6 +6231,8 @@ function makeChallengeData(anchorX, anchorZ) {
     if (cz < ROAD_SOUTH_EDGE + 10 && Math.abs(cx) < 25) continue;
     // Keep counting gates out of the hipodrom (it has its own jumping challenge)
     if (inHippoFootprint(cx, cz, 8)) continue;
+    // Keep gates out of the magic-cave clearing
+    if (Math.hypot(cx - CAVE.cx, cz - CAVE.cz) < 18) continue;
     // Check that no tree is within 8 units of the challenge center
     const tooClose = treePositions.some(t => {
       const dx = t.x - cx, dz = t.z - cz;
@@ -7463,6 +7676,7 @@ function update() {
   animateSprintSparkles(dt);
   updateInteractionZones(dt);
   updateHippodrome(dt);
+  updateCave(dt);
   updateMobileButtons();
   updateLetterDelivery(dt);
   updateMud();
@@ -8273,7 +8487,11 @@ function mpChallengeToData(ch) {
 // Host: seed the canonical world from whatever gates already exist locally.
 function mpEnsureWorld() {
   if (MP.world) return;
-  MP.world = { challenges: challenges.filter(c => c.active).map(mpChallengeToData), level };
+  MP.world = {
+    challenges: challenges.filter(c => c.active).map(mpChallengeToData),
+    level,
+    cave: { state: CAVE.state, until: CAVE.until },
+  };
 }
 
 // A rider position to anchor new gates near, so they land where the action is.
@@ -8304,7 +8522,10 @@ function mpReconcileChallenges(list) {
 
 function mpBroadcastWorld() {
   if (!mpIsHost() || !MP.sendWorld || !MP.world) return;
-  MP.sendWorld({ challenges: MP.world.challenges, level: MP.world.level });
+  const cave = MP.world.cave || { state: CAVE.state, until: CAVE.until };
+  // send REMAINING cooldown seconds (host clocks aren't comparable across machines)
+  const rem = cave.state === 'cooldown' ? Math.max(0, cave.until - clock.elapsedTime) : 0;
+  MP.sendWorld({ challenges: MP.world.challenges, level: MP.world.level, cave: { state: cave.state, rem } });
   MP._worldDirty = false;
 }
 
@@ -8343,12 +8564,18 @@ function mpOnWorld(id, d) {
     if (id && id < MP.selfId) MP.hostId = id;   // yield: I'm now a client
     else return;                                // I'm the real host — ignore theirs
   }
-  MP.world = { challenges: d.challenges || [], level: d.level || 1 };
+  MP.world = { challenges: d.challenges || [], level: d.level || 1, cave: MP.world && MP.world.cave };
   mpReconcileChallenges(MP.world.challenges);
   // reflect the shared difficulty on the HUD so gates and label agree
   const lv = Math.min(Math.max(MP.world.level, 1), LEVELS.length);
   const el = document.getElementById('level-display');
   if (el) el.textContent = LEVELS[lv - 1].name;
+  // adopt the shared cave state (client renders it; host drives transitions)
+  if (d.cave) {
+    CAVE.state = d.cave.state;
+    CAVE.until = clock.elapsedTime + (d.cave.rem || 0);
+    MP.world.cave = { state: CAVE.state, until: CAVE.until };
+  }
 }
 
 // A gate was answered correctly. Client asks the host; host resolves + tops up.
@@ -8377,11 +8604,18 @@ function mpResolveChallenge(chId) {
 // from my local gates) and start driving it.
 function mpHostAdopt() {
   mpEnsureWorld();
+  // I inherit the cave mid-cooldown without the original host's clock — restart
+  // the timer so it still reliably refills (a little extra empty time is fine).
+  if (CAVE.state === 'cooldown') { CAVE.until = clock.elapsedTime + CAVE.COOLDOWN; MP.world.cave = { state: 'cooldown', until: CAVE.until }; }
   mpFlash('Prowadzisz świat');
   mpBroadcastWorld();
 }
 
-function mpOnPick() { /* collectibles stay personal — no shared pick sync */ }
+// A client grabbed the cave treasure — as host, close it for its cooldown.
+function mpOnPick(id, d) {
+  if (!mpIsHost() || !d) return;
+  if (d.type === 'cave' && CAVE.state === 'open') caveSetState('cooldown', true);
+}
 
 // debug handle (harmless): inspect sync state from the console
 window.__mp = () => ({
@@ -8389,6 +8623,7 @@ window.__mp = () => ({
   peers: Object.keys(MP.peers).length,
   worldGates: MP.world ? MP.world.challenges.map(c => c.id) : null,
   localGates: challenges.filter(c => c.active).map(c => c.id),
+  cave: CAVE.state,
 });
 
 // ---- UI glue ----
