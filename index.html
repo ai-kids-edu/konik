@@ -576,7 +576,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 83, label: 'Sklepy bez wielkiego promptu' };
+const GAME_VERSION = { number: 84, label: 'Pasazer: koniec migania wsiada-wysiada' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7153,7 +7153,7 @@ function initInput() {
   window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
     Sfx.unlock();
-    if (e.code === 'Space') handleSpaceAction();
+    if (e.code === 'Space' && !e.repeat) handleSpaceAction();
     if (e.code === 'KeyM') attemptSellItem('carrot');
     if (e.code === 'KeyJ') attemptSellItem('apple');
     // Buy actions ignore auto-repeat so holding the key doesn't drain coins
@@ -7939,7 +7939,15 @@ function animateHorse(dt, input) {
 }
 
 // ========== SPACE ACTION (mount/dismount farmer) ==========
+let _lastMountAction = 0;
 function handleSpaceAction() {
+  // Debounce: key auto-repeat and the mobile button (and both at once) could fire
+  // this many times a second, flashing the passenger on and off — and with two
+  // passengers nearby, dropping one and grabbing the other ("two mounting").
+  const nowMs = performance.now();
+  if (nowMs - _lastMountAction < 400) return;
+  _lastMountAction = nowMs;
+
   if (ridingFarmer) {
     const farmer = ridingFarmer;
 
