@@ -576,7 +576,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 85, label: 'Malowanie grzywy myszką' };
+const GAME_VERSION = { number: 86, label: 'Spacja skok, E pasazer' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7230,7 +7230,7 @@ function initInput() {
   window.addEventListener('keydown', (e) => {
     keys[e.code] = true;
     Sfx.unlock();
-    if (e.code === 'Space' && !e.repeat) handleSpaceAction();
+    if (e.code === 'Space' && !e.repeat) attemptJump();   // Space = jump
     if (e.code === 'KeyM') attemptSellItem('carrot');
     if (e.code === 'KeyJ') attemptSellItem('apple');
     // Buy actions ignore auto-repeat so holding the key doesn't drain coins
@@ -7246,7 +7246,7 @@ function initInput() {
       if (e.code === 'Digit2' || e.code === 'Numpad2') attemptSelectHorse(1);
       if (e.code === 'Digit3' || e.code === 'Numpad3') attemptSelectHorse(2);
       // New consumable-action keys
-      if (e.code === 'KeyE') attemptJump();
+      if (e.code === 'KeyE') handleSpaceAction();   // E = mount/dismount passenger
       if (e.code === 'KeyZ') attemptEatHay();
       if (e.code === GROOM.key) attemptSalonAction();
       // W is a movement key too — this only fires on fresh press to consume napoj
@@ -7726,9 +7726,8 @@ function updateCarrotHUD() {
   html += `<div class="row" style="margin-top:10px;padding-top:8px;border-top:2px solid rgba(255,255,255,0.25);font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;gap:8px;color:#f6ecd0">`
     + (isMobile
         ? `<span style="font-size:32px">⤴️</span><span>skok konia</span>`
-        : `<span style="${badgeStyle};border:2px solid ${handColor('E')}">E</span>`
-          + `<span>skok konia</span>`
-          + `<span style="font-size:18px;color:${handColor('E')};font-weight:800;opacity:0.9;margin-left:2px">${handLabel('E')} ręką</span>`)
+        : `<span style="${badgeStyle};border:2px solid #9be7ff;padding:0 16px">Spacja</span>`
+          + `<span>skok konia</span>`)
     + `</div>`;
   // Sprint hint — desktop only (Shift has no touch equivalent).
   if (!isMobile) {
