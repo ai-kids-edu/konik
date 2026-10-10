@@ -546,7 +546,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 81, label: 'Klikanie myszką w sklepach' };
+const GAME_VERSION = { number: 82, label: 'Siodlo widoczne + wyglad konika w MP' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -9142,10 +9142,12 @@ function mpMakeRemoteHorse(coat, tag) {
     model.updateMatrixWorld(true);
     box = new THREE.Box3().setFromObject(model);
     model.position.y = -box.min.y;
+    var saddleMeshes = [], coatMats = [];
     model.traverse(ch => {
       if (ch.isMesh) ch.castShadow = false;
       const nm = (ch.name + ' ' + ((ch.material && ch.material.name) || '')).toLowerCase();
-      if (nm.includes('saddle') || nm.includes('bridle')) ch.visible = false;
+      if (nm.includes('saddle') || nm.includes('bridle')) { ch.visible = false; saddleMeshes.push(ch); }
+      if (ch.material) { const mats = Array.isArray(ch.material) ? ch.material : [ch.material]; for (const m of mats) if ((m.name || '').toLowerCase() === 'horse') coatMats.push(m); }
     });
     mpApplyCoatTo(model, coat || 'white');
     g.add(model);
@@ -9163,7 +9165,20 @@ function mpMakeRemoteHorse(coat, tag) {
   const label = mpMakeLabel(tag || '🐴');
   label.position.y = 4.2; g.add(label);
   scene.add(g);
-  return { group: g, mixer, acts, model, label, curAnim: 'idle' };
+  return { group: g, mixer, acts, model, label, curAnim: 'idle', saddleMeshes: saddleMeshes || [], coatMats: coatMats || [] };
+}
+
+// Mirror a peer's horse look (saddle on/off + groomed sheen) onto their clone.
+function mpApplyLook(p) {
+  if (p.saddleMeshes) for (const m of p.saddleMeshes) m.visible = !!p.saddle;
+  const glossLevel = p.dirty ? 0 : (p.groom || 0);
+  const isWhite = (p.coat || 'white') === 'white';
+  if (p.coatMats) for (const m of p.coatMats) {
+    if (m.emissive) { m.emissive.setHex(isWhite ? 0xfff6fb : 0xffffff); m.emissiveIntensity = isWhite ? Math.min(0.5, 0.2 * glossLevel) : Math.min(0.1, 0.04 * glossLevel); }
+    if ('roughness' in m) m.roughness = Math.max(0.12, (m.userData.baseRoughness != null ? m.userData.baseRoughness : 0.85) - 0.3 * glossLevel);
+    if ('metalness' in m) m.metalness = Math.min(isWhite ? 0.35 : 0.22, (isWhite ? 0.12 : 0.08) * glossLevel);
+    m.needsUpdate = true;
+  }
 }
 
 function mpSetAnim(p, name) {
@@ -9263,14 +9278,19 @@ function mpOnState(id, d) {
   if (!p) {
     p = mpMakeRemoteHorse(d.coat, d.tag);
     p.coat = d.coat; p.tag = d.tag;
+    p.groom = d.groom || 0; p.dirty = !!d.dirty; p.saddle = !!d.saddle;
     p.cur = { x: d.x, y: d.y, z: d.z, a: d.a };
     p.group.position.set(d.x, d.y, d.z);
     p.group.rotation.y = d.a;
     MP.peers[id] = p;
+    mpApplyLook(p);
     mpUpdateUI();
   }
   // coat changed mid-session → re-skin
-  if (d.coat && d.coat !== p.coat) { p.coat = d.coat; mpApplyCoatTo(p.model, d.coat); }
+  if (d.coat && d.coat !== p.coat) { p.coat = d.coat; mpApplyCoatTo(p.model, d.coat); mpApplyLook(p); }
+  // look (saddle / grooming / mud) changed → re-apply
+  const ng = d.groom || 0, nd = !!d.dirty, ns = !!d.saddle;
+  if (ng !== p.groom || nd !== p.dirty || ns !== p.saddle) { p.groom = ng; p.dirty = nd; p.saddle = ns; mpApplyLook(p); }
   p.target = { x: d.x, y: d.y, z: d.z, a: d.a, sp: d.sp || 0 };
   p.last = clock.elapsedTime;
 }
@@ -9287,6 +9307,7 @@ function mpSendStateNow() {
     x: horsePos.x, y: horsePos.y, z: horsePos.z,
     a: horseAngle, sp: horseSpeed,
     coat: coatSkin, tag: MP.tag,
+    groom: groomLevel, dirty: isDirty ? 1 : 0, saddle: (inventory.siodlo || 0) > 0 ? 1 : 0,
   });
 }
 
@@ -9735,6 +9756,7 @@ window.startGame = async function () {
     // coatSkin is owned by the intro picker (which pre-seeds from this save), so
     // don't override the player's just-made choice here.
     refreshHorseLook();
+    applySaddle(); // re-apply now that the saved inventory (incl. a bought saddle) is restored
     correctAnswers = saved.correctAnswers;
     totalAnswers = saved.totalAnswers;
     runTimer = saved.runTimer || 0;
