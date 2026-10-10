@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 78, label: 'Jaskinia wykuta w klifie' };
+const GAME_VERSION = { number: 79, label: 'Postacie patrzą we właściwą stronę' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2452,7 +2452,7 @@ function updateWalkingNpcs(dt) {
       continue;
     }
     const ang = directionAngle(dx, dz);
-    g.rotation.y = angleToRotationY(ang);
+    g.rotation.y = personFaceY(f, ang);
     const step = Math.min(NPC_WALK_SPEED * dt, dist);
     g.position.x += Math.sin(ang) * step;
     g.position.z += Math.cos(ang) * step;
@@ -6106,6 +6106,12 @@ const PERSON_LOOK = {
   hairdresser: { model: 'person_casual_2' },
 };
 
+// Facing: primitives face +X (MODEL_ROT_OFFSET); rigged people carry PERSON_YAW
+// on the inner model, so the group must cancel it for the net heading to match
+// the movement angle.
+function personFaceY(f, moveAngle) {
+  return f.actions ? (moveAngle - PERSON_YAW) : angleToRotationY(moveAngle);
+}
 function setPersonAnim(f, name) {
   if (!f.actions || f.curAnim === name) return;
   const next = f.actions[name] || f.actions.idle;
@@ -6143,7 +6149,7 @@ function createRiggedPerson(x, z, faceAngle, kind, look) {
   const h = getTerrainHeight(x, z);
   const group = new THREE.Group();
   group.position.set(x, h, z);
-  group.rotation.y = angleToRotationY(faceAngle);
+  group.rotation.y = faceAngle - PERSON_YAW; // net heading = faceAngle
   group.add(model);
   scene.add(group);
 
@@ -6530,7 +6536,7 @@ function animateFarmAnimals(dt) {
     if (farmer.walkingHome) continue; // walker owns its own facing + anim
 
     if (fDist < 12) {
-      const targetAngle = angleToRotationY(directionAngle(fdx, fdz));
+      const targetAngle = personFaceY(farmer, directionAngle(fdx, fdz));
       fg.rotation.y = lerpAngle(fg.rotation.y, targetAngle, dt * 3);
       const near = fDist < 6;
       if (farmer.actions) {                      // rigged person — play a clip
