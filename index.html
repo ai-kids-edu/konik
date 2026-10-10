@@ -451,6 +451,29 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
   border-radius: 14px; box-shadow: 0 3px 0 #c99a2e; font-family: 'Segoe UI', Tahoma, sans-serif;
 }
 @keyframes hand-tap { 0%,100% { translate: 0 0; } 50% { translate: 0 -14px; } }
+
+/* ===== Mane/tail mini-paint ===== */
+#paint-ui { position: fixed; inset: 0; z-index: 70; pointer-events: none; display: none; }
+#paint-ui.show { display: block; }
+#paint-title { position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  background: rgba(20,14,8,0.6); color: #fff; font-weight: 900; font-size: 26px; text-align: center;
+  padding: 10px 24px; border-radius: 18px; border: 3px solid rgba(255,220,120,0.9);
+  font-family: 'Segoe UI', Tahoma, sans-serif; text-shadow: 1px 1px 0 rgba(0,0,0,0.5); }
+#paint-title span { font-size: 17px; font-weight: 600; opacity: 0.9; }
+#paint-swatches { position: absolute; left: 22px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 14px; pointer-events: auto;
+  background: rgba(20,14,8,0.5); padding: 16px 14px; border-radius: 22px;
+  border: 3px solid rgba(255,255,255,0.4); }
+.paint-swatch { width: 60px; height: 60px; border-radius: 50%; cursor: pointer;
+  border: 5px solid rgba(255,255,255,0.5); transition: transform .1s, border-color .1s;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.4); }
+.paint-swatch:hover { transform: scale(1.12); }
+.paint-swatch.sel { border-color: #fff; transform: scale(1.18); box-shadow: 0 0 0 4px rgba(255,255,255,0.4); }
+#paint-done { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+  pointer-events: auto; cursor: pointer; background: linear-gradient(135deg,#66cc44,#33aa22);
+  color: #fff; font-weight: 900; font-size: 26px; padding: 14px 44px; border-radius: 40px;
+  border: 4px solid #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.4); font-family: 'Segoe UI', Tahoma, sans-serif; }
+#paint-done:active { transform: translateX(-50%) scale(0.95); }
 </style>
 </head>
 <body>
@@ -523,6 +546,13 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
      standing at (shop / sell / stable / salon). Teaches clicking. -->
 <div id="station-panel"><div id="station-tiles"></div></div>
 
+<!-- Mane/tail mini-paint: palette on the left, done button. Shown in paint mode. -->
+<div id="paint-ui">
+  <div id="paint-title">🎨 Pomaluj grzywę!<br><span>Wybierz kolor i rysuj po grzywie i ogonie</span></div>
+  <div id="paint-swatches"></div>
+  <div id="paint-done">✓ Gotowe</div>
+</div>
+
 <!-- Steering feedback: marker sits centred + green when going straight, slides
      left/right and turns orange to show which way / how hard we're turning. -->
 <div id="steer-indicator">
@@ -546,7 +576,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 82, label: 'Siodlo widoczne + wyglad konika w MP' };
+const GAME_VERSION = { number: 83, label: 'Sklepy bez wielkiego promptu' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -1686,6 +1716,9 @@ function updateInteractionZones(dt) {
 
 let sellPromptEl = null;
 function updateInteractionPrompt(activeZone) {
+  // On desktop the big keyboard prompt is replaced by the click panel (#station-panel),
+  // so suppress it entirely — the clickable tiles say what to do. Keys still work.
+  if (!isMobile) { if (sellPromptEl) sellPromptEl.style.opacity = '0'; return; }
   if (!sellPromptEl) {
     sellPromptEl = document.createElement('div');
     // On small screens the box is scaled down (and anchored to its top) so it
@@ -1869,6 +1902,7 @@ const RAINBOW_COLORS = [0xff3b30, 0xff9500, 0xffd60a, 0x34c759, 0x0a84ff, 0x5e5c
 let groomAccessories = null;
 let horseCoatMats = [];
 let horseHairMats = [];
+let horseHairMeshes = []; // the hair skinned-meshes, for raycast painting
 const hairOrigMaps = new Map();
 let coatColor = 0xe9e2d3; // natural warm off-white (not snow-white); salon can recolour
 let coatOrigImg = null;   // the model's own coat texture — reused for real fur shading
@@ -6678,7 +6712,7 @@ function createHorse() {
         if (mn === 'horse') {                               // body coat — paintable
           horseCoatMats.push(m);
           if (!coatOrigImg && m.map && m.map.image) coatOrigImg = m.map.image; // keep for shading
-        } else if (mn === 'hair') { horseHairMats.push(m); hairOrigMaps.set(m, m.map || null); }
+        } else if (mn === 'hair') { horseHairMats.push(m); hairOrigMaps.set(m, m.map || null); horseHairMeshes.push(child); }
       });
       const tag = (child.name + ' ' + (child.material.name || '')).toLowerCase();
       if (tag.includes('saddle')) { saddleMeshes.push(child); child.visible = SHOW_SADDLE; } // shown once a saddle is bought
