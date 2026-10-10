@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 90, label: "Narzedzia malowania + obrot" };
+const GAME_VERSION = { number: 91, label: "Malowanie: widok 3/4 + sync MP" };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2154,6 +2154,7 @@ function loadHairPaint() { // restore a saved painting on game load
   const img = new Image();
   img.onload = () => { ensurePaintCanvas(); _paintCtx.drawImage(img, 0, 0, 512, 512); _paintTex.needsUpdate = true; hairPainted = true; refreshHorseLook(); };
   img.src = data;
+  MP.myHairPaint = data; // so peers get my saved paint on connect
 }
 function initPaintUI() {
   const wrap = document.getElementById('paint-swatches');
@@ -2227,7 +2228,12 @@ function exitPaintMode() {
   paintMode = false; _isPainting = false;
   document.body.classList.remove('painting');
   const ui = document.getElementById('paint-ui'); if (ui) ui.classList.remove('show');
-  try { localStorage.setItem(SAVE_KEY + '_hairPaint', _paintCanvas.toDataURL('image/png')); } catch {}
+  let data = null;
+  try { data = _paintCanvas.toDataURL('image/webp', 0.85); } catch { try { data = _paintCanvas.toDataURL('image/png'); } catch {} }
+  if (data) { try { localStorage.setItem(SAVE_KEY + '_hairPaint', data); } catch {}
+    MP.myHairPaint = data;
+    if (MP.sendHair && MP.status === 'connected') MP.sendHair(data);   // show every peer my new paint
+  }
   sfx('buy');
 }
 function paintStrokeAt(clientX, clientY) {
@@ -8737,9 +8743,9 @@ function update() {
   if (paintMode && horse) {
     // Orbit the view around the horse so both sides (and the top) are reachable.
     const view = horseAngle + Math.PI / 2 + paintViewAngle;
-    const dist = 7.5, hgt = 3.2 + paintViewHeight;
+    const dist = 6.3, hgt = 5.0 + paintViewHeight;   // 3/4 from above so the TOP of the mane is visible & clickable
     camera.position.set(horsePos.x + Math.sin(view) * dist, horsePos.y + hgt, horsePos.z + Math.cos(view) * dist);
-    camera.lookAt(horsePos.x, horsePos.y + 1.7, horsePos.z);
+    camera.lookAt(horsePos.x, horsePos.y + 1.2, horsePos.z);
   }
 
   // Challenge management. Solo: spawn locally as before. Multiplayer: the host
@@ -9437,12 +9443,13 @@ function mpMakeRemoteHorse(coat, tag) {
     model.updateMatrixWorld(true);
     box = new THREE.Box3().setFromObject(model);
     model.position.y = -box.min.y;
-    var saddleMeshes = [], coatMats = [];
+    var saddleMeshes = [], coatMats = [], hairMats = [];
     model.traverse(ch => {
       if (ch.isMesh) ch.castShadow = false;
       const nm = (ch.name + ' ' + ((ch.material && ch.material.name) || '')).toLowerCase();
       if (nm.includes('saddle') || nm.includes('bridle')) { ch.visible = false; saddleMeshes.push(ch); }
-      if (ch.material) { const mats = Array.isArray(ch.material) ? ch.material : [ch.material]; for (const m of mats) if ((m.name || '').toLowerCase() === 'horse') coatMats.push(m); }
+      if (ch.material) { const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+        for (const m of mats) { const mn = (m.name || '').toLowerCase(); if (mn === 'horse') coatMats.push(m); else if (mn === 'hair') hairMats.push(m); } }
     });
     mpApplyCoatTo(model, coat || 'white');
     g.add(model);
@@ -9460,7 +9467,25 @@ function mpMakeRemoteHorse(coat, tag) {
   const label = mpMakeLabel(tag || '🐴');
   label.position.y = 4.2; g.add(label);
   scene.add(g);
-  return { group: g, mixer, acts, model, label, curAnim: 'idle', saddleMeshes: saddleMeshes || [], coatMats: coatMats || [] };
+  return { group: g, mixer, acts, model, label, curAnim: 'idle', saddleMeshes: saddleMeshes || [], coatMats: coatMats || [], hairMats: hairMats || [] };
+}
+
+// Apply a peer's painted mane/tail (a dataURL) onto their horse's hair materials.
+function mpApplyHairPaintTo(p, dataURL) {
+  if (!p || !p.hairMats || !p.hairMats.length || !dataURL) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    c.getContext('2d').drawImage(img, 0, 0, 512, 512);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false;
+    for (const m of p.hairMats) { m.map = tex; if (m.color) m.color.setHex(0xffffff); m.needsUpdate = true; }
+  };
+  img.src = dataURL;
+}
+function mpOnHairPaint(id, data) {
+  const p = MP.peers[id]; if (!p) { return; }
+  p.hairPaint = data;
+  mpApplyHairPaintTo(p, data);
 }
 
 // Mirror a peer's horse look (saddle on/off + groomed sheen) onto their clone.
@@ -9504,9 +9529,11 @@ async function mpConnect(secret) {
     const [sendSolve, getSolve] = MP.room.makeAction('sv');   // client → host: I answered a gate
     const [sendPick,  getPick]  = MP.room.makeAction('pk');   // client → host: I took a collectible
     const [sendNpc,   getNpc]   = MP.room.makeAction('np');   // host → all: ambient NPC positions
+    const [sendHair,  getHair]  = MP.room.makeAction('hp');   // any → all: painted mane/tail (dataURL, sent on change/join)
     MP.sendState = sendState; MP.sendEmote = sendEmote;
     MP.sendWorld = sendWorld; MP.sendSolve = sendSolve; MP.sendPick = sendPick;
-    MP.sendNpc = sendNpc;
+    MP.sendNpc = sendNpc; MP.sendHair = sendHair;
+    getHair((data, id) => mpOnHairPaint(id, data));
     getState((data, id) => mpOnState(id, data));
     getEmote((data, id) => mpOnEmote(id, data));
     getWorld((data, id) => mpOnWorld(id, data));
@@ -9516,6 +9543,7 @@ async function mpConnect(secret) {
     MP.room.onPeerJoin((id) => {
       mpFlash('Dołączył gracz!');
       mpSendStateNow();
+      if (MP.myHairPaint && MP.sendHair) MP.sendHair(MP.myHairPaint, id);  // show the newcomer my paint
       mpRecomputeHost();
       if (mpIsHost()) mpBroadcastWorld(true);   // hand the newcomer the current world
       mpUpdateUI();
