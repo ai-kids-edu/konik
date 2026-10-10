@@ -482,6 +482,29 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
   color: #fff; font-weight: 900; font-size: 26px; padding: 14px 44px; border-radius: 40px;
   border: 4px solid #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.4); font-family: 'Segoe UI', Tahoma, sans-serif; }
 #paint-done:active { transform: translateX(-50%) scale(0.95); }
+#paint-tools { position: absolute; right: 22px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 12px; pointer-events: auto;
+  background: rgba(20,14,8,0.5); padding: 14px 12px; border-radius: 22px;
+  border: 3px solid rgba(255,255,255,0.4); }
+.paint-tool { width: 62px; height: 62px; border-radius: 16px; cursor: pointer;
+  background: rgba(0,0,0,0.3); border: 4px solid rgba(255,255,255,0.45);
+  display: flex; align-items: center; justify-content: center; font-size: 30px;
+  transition: transform .1s, border-color .1s, background .1s; user-select: none; }
+.paint-tool:hover { transform: scale(1.1); }
+.paint-tool.sel { border-color: #ffe08a; background: rgba(255,220,120,0.2); transform: scale(1.12); }
+#paint-cursor { position: fixed; left: 0; top: 0; z-index: 72; pointer-events: none; display: none;
+  width: 70px; height: 70px; border-radius: 50%; border: 4px solid #ff3b30;
+  transform: translate(-50%, -50%); box-shadow: 0 0 0 2px rgba(255,255,255,0.6);
+  align-items: center; justify-content: center; }
+body.painting #paint-cursor { display: flex; }
+#paint-rotate { position: absolute; bottom: 30px; left: 30px; display: flex; gap: 12px; pointer-events: auto; }
+.pr-btn { width: 66px; height: 66px; border-radius: 50%; cursor: pointer; font-size: 34px; color: #fff;
+  background: rgba(20,14,8,0.55); border: 4px solid rgba(255,255,255,0.5);
+  display: flex; align-items: center; justify-content: center; user-select: none; transition: transform .1s; }
+.pr-btn:hover { transform: scale(1.1); border-color: #ffe08a; }
+.pr-btn:active { transform: scale(0.92); }
+#paint-cursor .pc-emoji { font-size: 26px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)); transform: translate(6px, 6px); }
+body.painting canvas { cursor: none; }
 </style>
 </head>
 <body>
@@ -558,7 +581,14 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 <div id="paint-ui">
   <div id="paint-title">🎨 Pomaluj grzywę!<br><span>Wybierz kolor i rysuj po grzywie i ogonie</span></div>
   <div id="paint-swatches"></div>
-  <div id="paint-done">✓ Gotowe</div>
+  <div id="paint-tools"></div>
+  <div id="paint-rotate">
+    <div class="pr-btn" data-rot="-1">↶</div>
+    <div class="pr-btn" data-top="1">⤒</div>
+    <div class="pr-btn" data-rot="1">↷</div>
+  </div>
+  <div id="paint-done">✓ Koniec malowania</div>
+  <div id="paint-cursor"><span class="pc-emoji">🖌️</span></div>
 </div>
 
 <!-- Steering feedback: marker sits centred + green when going straight, slides
@@ -584,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 87, label: "Podpis questa na desktopie (list dla farmera)" };
+const GAME_VERSION = { number: 90, label: "Narzedzia malowania + obrot" };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2085,7 +2115,12 @@ function restoreHair() {
 let paintMode = false;
 let hairPainted = false;         // a custom paint exists → it wins over rainbow/plain
 let paintColor = '#ff3b30';
+let paintTool = 'brush';   // 'brush' | 'erase' | 'glitter'
+let brushR = 34;           // brush radius (px on the 512 canvas)
+let paintViewAngle = 0;    // orbit around the horse (rotate buttons / arrows)
+let paintViewHeight = 0;   // raise for a more top-down view
 let _paintCanvas = null, _paintTex = null, _paintCtx = null;
+let _paintBaseCanvas = null; // pristine strands, for eraser / "od nowa"
 let _isPainting = false;
 const PAINT_COLORS = ['#ff3b30','#ff9500','#ffd60a','#34c759','#0a84ff','#5e5ce6','#bf5af2','#ff2d95','#ffffff','#2b2b2b'];
 const _paintRay = new THREE.Raycaster();
@@ -2093,14 +2128,25 @@ const _paintNdc = new THREE.Vector2();
 
 function ensurePaintCanvas() {
   if (_paintCanvas) return;
+  _paintBaseCanvas = document.createElement('canvas');
+  _paintBaseCanvas.width = _paintBaseCanvas.height = 512;
+  const bctx = _paintBaseCanvas.getContext('2d');
+  const base = hairOrigMaps.size ? [...hairOrigMaps.values()][0] : null; // model's own strands
+  if (base && base.image) { try { bctx.drawImage(base.image, 0, 0, 512, 512); } catch { bctx.fillStyle = '#9a9a9a'; bctx.fillRect(0, 0, 512, 512); } }
+  else { bctx.fillStyle = '#9a9a9a'; bctx.fillRect(0, 0, 512, 512); }
   _paintCanvas = document.createElement('canvas');
   _paintCanvas.width = _paintCanvas.height = 512;
   _paintCtx = _paintCanvas.getContext('2d');
-  const base = hairOrigMaps.size ? [...hairOrigMaps.values()][0] : null; // model's own strands
-  if (base && base.image) { try { _paintCtx.drawImage(base.image, 0, 0, 512, 512); } catch { _paintCtx.fillStyle = '#9a9a9a'; _paintCtx.fillRect(0, 0, 512, 512); } }
-  else { _paintCtx.fillStyle = '#9a9a9a'; _paintCtx.fillRect(0, 0, 512, 512); }
+  _paintCtx.drawImage(_paintBaseCanvas, 0, 0);
   _paintTex = new THREE.CanvasTexture(_paintCanvas);
   _paintTex.colorSpace = THREE.SRGBColorSpace; _paintTex.flipY = false;
+}
+function clearPaint() {   // "od nowa" — restore the original strands
+  if (!_paintCtx) return;
+  _paintCtx.globalCompositeOperation = 'source-over';
+  _paintCtx.clearRect(0, 0, 512, 512);
+  _paintCtx.drawImage(_paintBaseCanvas, 0, 0);
+  _paintTex.needsUpdate = true;
 }
 function loadHairPaint() { // restore a saved painting on game load
   let data = null; try { data = localStorage.getItem(SAVE_KEY + '_hairPaint'); } catch {}
@@ -2111,26 +2157,75 @@ function loadHairPaint() { // restore a saved painting on game load
 }
 function initPaintUI() {
   const wrap = document.getElementById('paint-swatches');
-  if (!wrap || wrap.childElementCount) return;
-  PAINT_COLORS.forEach((c, i) => {
-    const s = document.createElement('div');
-    s.className = 'paint-swatch' + (i === 0 ? ' sel' : '');
-    s.style.background = c;
-    s.onclick = () => { paintColor = c; sfx('click'); wrap.querySelectorAll('.paint-swatch').forEach(e => e.classList.remove('sel')); s.classList.add('sel'); };
-    wrap.appendChild(s);
-  });
+  if (wrap && !wrap.childElementCount) {
+    PAINT_COLORS.forEach((c, i) => {
+      const s = document.createElement('div');
+      s.className = 'paint-swatch' + (i === 0 ? ' sel' : '');
+      s.style.background = c;
+      s.onclick = () => { paintColor = c; paintTool = 'brush'; sfx('click'); selectPaintColor(s); syncToolSel(); updatePaintCursor(); };
+      wrap.appendChild(s);
+    });
+  }
+  const tools = document.getElementById('paint-tools');
+  if (tools && !tools.childElementCount) {
+    const TOOLS = [
+      { id: 'small',   emoji: '🖊️', tip: () => { paintTool = 'brush'; brushR = 18; } },
+      { id: 'medium',  emoji: '🖌️', tip: () => { paintTool = 'brush'; brushR = 34; }, sel: true },
+      { id: 'large',   emoji: '🖍️', tip: () => { paintTool = 'brush'; brushR = 58; } },
+      { id: 'glitter', emoji: '✨',  tip: () => { paintTool = 'glitter'; } },
+      { id: 'erase',   emoji: '🧽',  tip: () => { paintTool = 'erase'; } },
+      { id: 'clear',   emoji: '🔄',  tip: () => { clearPaint(); }, momentary: true },
+    ];
+    TOOLS.forEach(t => {
+      const b = document.createElement('div');
+      b.className = 'paint-tool' + (t.sel ? ' sel' : '');
+      b.dataset.tool = t.id; b.textContent = t.emoji;
+      b.onclick = () => { t.tip(); sfx('click');
+        if (!t.momentary) { tools.querySelectorAll('.paint-tool').forEach(e => e.classList.remove('sel')); b.classList.add('sel'); }
+        updatePaintCursor(); };
+      tools.appendChild(b);
+    });
+  }
+  const rot = document.getElementById('paint-rotate');
+  if (rot && !rot.dataset.wired) {
+    rot.dataset.wired = '1';
+    rot.querySelectorAll('.pr-btn').forEach(b => b.onclick = () => {
+      sfx('click');
+      if (b.dataset.rot) paintViewAngle += Number(b.dataset.rot) * (Math.PI / 3);
+      if (b.dataset.top) paintViewHeight = paintViewHeight > 2 ? 0 : 5;  // toggle top-down
+    });
+  }
   const done = document.getElementById('paint-done');
   if (done) done.onclick = () => exitPaintMode();
+}
+function selectPaintColor(el) { document.querySelectorAll('#paint-swatches .paint-swatch').forEach(e => e.classList.remove('sel')); el.classList.add('sel'); }
+function syncToolSel() { // picking a colour implies the brush tool
+  const tools = document.getElementById('paint-tools'); if (!tools) return;
+  tools.querySelectorAll('.paint-tool').forEach(e => e.classList.toggle('sel', e.dataset.tool === 'medium' && brushR === 34 || (e.dataset.tool === 'small' && brushR === 18) || (e.dataset.tool === 'large' && brushR === 58)));
+}
+// Custom brush cursor that follows the mouse and shows size + colour/tool.
+let _paintCursorEl = null;
+function updatePaintCursor() {
+  if (!_paintCursorEl) { _paintCursorEl = document.getElementById('paint-cursor'); }
+  if (!_paintCursorEl) return;
+  const scr = brushR * (renderer ? renderer.domElement.clientHeight / 512 : 1) * 2.2; // rough screen size
+  const d = Math.max(28, Math.min(160, scr));
+  _paintCursorEl.style.width = _paintCursorEl.style.height = d + 'px';
+  _paintCursorEl.style.borderColor = paintTool === 'erase' ? '#fff' : paintColor;
+  _paintCursorEl.querySelector('.pc-emoji').textContent = paintTool === 'glitter' ? '✨' : paintTool === 'erase' ? '🧽' : '🖌️';
 }
 function enterPaintMode() {
   if (!horse || !horseHairMeshes.length) return;
   ensurePaintCanvas(); initPaintUI();
   applyHairMap(_paintTex); hairPainted = true;
-  paintMode = true;
+  paintMode = true; paintViewAngle = 0; paintViewHeight = 0;
+  document.body.classList.add('painting');
+  updatePaintCursor();
   const ui = document.getElementById('paint-ui'); if (ui) ui.classList.add('show');
 }
 function exitPaintMode() {
   paintMode = false; _isPainting = false;
+  document.body.classList.remove('painting');
   const ui = document.getElementById('paint-ui'); if (ui) ui.classList.remove('show');
   try { localStorage.setItem(SAVE_KEY + '_hairPaint', _paintCanvas.toDataURL('image/png')); } catch {}
   sfx('buy');
@@ -2145,14 +2240,31 @@ function paintStrokeAt(clientX, clientY) {
   if (!hits.length || !hits[0].uv) return;
   const uv = hits[0].uv;
   const x = uv.x * 512, y = uv.y * 512;   // flipY=false → canvas y = uv.y
-  const ctx = _paintCtx, R = 34;
-  // source-atop: vivid colour only where the strands are (keeps their shape, not
-  // the grey). Soft edge via the gradient's fading alpha.
-  ctx.globalCompositeOperation = 'source-atop';
-  const g = ctx.createRadialGradient(x, y, 0, x, y, R);
-  g.addColorStop(0, paintColor); g.addColorStop(0.7, paintColor); g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
-  ctx.globalCompositeOperation = 'source-over';
+  const ctx = _paintCtx, R = brushR;
+  if (paintTool === 'erase') {
+    // Restore the original strands from the pristine base inside the brush circle.
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.clip();
+    ctx.clearRect(x - R, y - R, 2 * R, 2 * R);
+    ctx.drawImage(_paintBaseCanvas, x - R, y - R, 2 * R, 2 * R, x - R, y - R, 2 * R, 2 * R);
+    ctx.restore();
+  } else if (paintTool === 'glitter') {
+    // Sparkly dots that ride the strands.
+    ctx.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * R;
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr, sr = 1.5 + Math.random() * 3;
+      ctx.fillStyle = Math.random() < 0.5 ? '#ffffff' : paintColor;
+      ctx.beginPath(); ctx.arc(px, py, sr, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  } else {
+    // source-atop: vivid colour only where the strands are (keeps their shape).
+    ctx.globalCompositeOperation = 'source-atop';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+    g.addColorStop(0, paintColor); g.addColorStop(0.7, paintColor); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
   _paintTex.needsUpdate = true;
 }
 
@@ -7275,11 +7387,23 @@ function initInput() {
   const canvasEl = renderer && renderer.domElement;
   if (canvasEl) {
     canvasEl.addEventListener('pointerdown', (e) => { if (!paintMode) return; _isPainting = true; paintStrokeAt(e.clientX, e.clientY); });
-    window.addEventListener('pointermove', (e) => { if (paintMode && _isPainting) paintStrokeAt(e.clientX, e.clientY); });
+    window.addEventListener('pointermove', (e) => {
+      if (!paintMode) return;
+      if (_paintCursorEl) { _paintCursorEl.style.left = e.clientX + 'px'; _paintCursorEl.style.top = e.clientY + 'px'; }
+      if (_isPainting) paintStrokeAt(e.clientX, e.clientY);
+    });
     window.addEventListener('pointerup', () => { _isPainting = false; });
   }
-  // Dev: ?save_name slot + press P to open the paint mode quickly.
-  window.addEventListener('keydown', (e) => { if (e.code === 'KeyU' && SAVE_NAME) enterPaintMode(); });
+  // Dev: ?save_name slot + press U opens paint mode. Arrows rotate the view while painting.
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyU' && SAVE_NAME) enterPaintMode();
+    if (paintMode) {
+      if (e.code === 'ArrowLeft') paintViewAngle -= Math.PI / 3;
+      else if (e.code === 'ArrowRight') paintViewAngle += Math.PI / 3;
+      else if (e.code === 'ArrowUp') paintViewHeight = 5;
+      else if (e.code === 'ArrowDown') paintViewHeight = 0;
+    }
+  });
 
   // Detect mobile
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -8611,9 +8735,10 @@ function update() {
 
   Camera.follow(dt);
   if (paintMode && horse) {
-    // Side profile so the mane and tail are both visible and clickable.
-    const rx = Math.cos(horseAngle), rz = -Math.sin(horseAngle); // horse's right
-    camera.position.set(horsePos.x + rx * 7.5, horsePos.y + 3.2, horsePos.z + rz * 7.5);
+    // Orbit the view around the horse so both sides (and the top) are reachable.
+    const view = horseAngle + Math.PI / 2 + paintViewAngle;
+    const dist = 7.5, hgt = 3.2 + paintViewHeight;
+    camera.position.set(horsePos.x + Math.sin(view) * dist, horsePos.y + hgt, horsePos.z + Math.cos(view) * dist);
     camera.lookAt(horsePos.x, horsePos.y + 1.7, horsePos.z);
   }
 
