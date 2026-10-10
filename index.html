@@ -576,7 +576,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 84, label: 'Pasazer: koniec migania wsiada-wysiada' };
+const GAME_VERSION = { number: 85, label: 'Malowanie grzywy myszką' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2073,6 +2073,81 @@ function restoreHair() {
   for (const m of horseHairMats) { m.map = hairOrigMaps.get(m) || null; m.needsUpdate = true; }
 }
 
+// ===== Mane/tail mini-paint (mouse: palette click + brush drag on the 3D horse) =====
+let paintMode = false;
+let hairPainted = false;         // a custom paint exists → it wins over rainbow/plain
+let paintColor = '#ff3b30';
+let _paintCanvas = null, _paintTex = null, _paintCtx = null;
+let _isPainting = false;
+const PAINT_COLORS = ['#ff3b30','#ff9500','#ffd60a','#34c759','#0a84ff','#5e5ce6','#bf5af2','#ff2d95','#ffffff','#2b2b2b'];
+const _paintRay = new THREE.Raycaster();
+const _paintNdc = new THREE.Vector2();
+
+function ensurePaintCanvas() {
+  if (_paintCanvas) return;
+  _paintCanvas = document.createElement('canvas');
+  _paintCanvas.width = _paintCanvas.height = 512;
+  _paintCtx = _paintCanvas.getContext('2d');
+  const base = hairOrigMaps.size ? [...hairOrigMaps.values()][0] : null; // model's own strands
+  if (base && base.image) { try { _paintCtx.drawImage(base.image, 0, 0, 512, 512); } catch { _paintCtx.fillStyle = '#9a9a9a'; _paintCtx.fillRect(0, 0, 512, 512); } }
+  else { _paintCtx.fillStyle = '#9a9a9a'; _paintCtx.fillRect(0, 0, 512, 512); }
+  _paintTex = new THREE.CanvasTexture(_paintCanvas);
+  _paintTex.colorSpace = THREE.SRGBColorSpace; _paintTex.flipY = false;
+}
+function loadHairPaint() { // restore a saved painting on game load
+  let data = null; try { data = localStorage.getItem(SAVE_KEY + '_hairPaint'); } catch {}
+  if (!data) return;
+  const img = new Image();
+  img.onload = () => { ensurePaintCanvas(); _paintCtx.drawImage(img, 0, 0, 512, 512); _paintTex.needsUpdate = true; hairPainted = true; refreshHorseLook(); };
+  img.src = data;
+}
+function initPaintUI() {
+  const wrap = document.getElementById('paint-swatches');
+  if (!wrap || wrap.childElementCount) return;
+  PAINT_COLORS.forEach((c, i) => {
+    const s = document.createElement('div');
+    s.className = 'paint-swatch' + (i === 0 ? ' sel' : '');
+    s.style.background = c;
+    s.onclick = () => { paintColor = c; sfx('click'); wrap.querySelectorAll('.paint-swatch').forEach(e => e.classList.remove('sel')); s.classList.add('sel'); };
+    wrap.appendChild(s);
+  });
+  const done = document.getElementById('paint-done');
+  if (done) done.onclick = () => exitPaintMode();
+}
+function enterPaintMode() {
+  if (!horse || !horseHairMeshes.length) return;
+  ensurePaintCanvas(); initPaintUI();
+  applyHairMap(_paintTex); hairPainted = true;
+  paintMode = true;
+  const ui = document.getElementById('paint-ui'); if (ui) ui.classList.add('show');
+}
+function exitPaintMode() {
+  paintMode = false; _isPainting = false;
+  const ui = document.getElementById('paint-ui'); if (ui) ui.classList.remove('show');
+  try { localStorage.setItem(SAVE_KEY + '_hairPaint', _paintCanvas.toDataURL('image/png')); } catch {}
+  sfx('buy');
+}
+function paintStrokeAt(clientX, clientY) {
+  if (!paintMode || !_paintTex || !renderer) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  _paintNdc.x = ((clientX - r.left) / r.width) * 2 - 1;
+  _paintNdc.y = -((clientY - r.top) / r.height) * 2 + 1;
+  _paintRay.setFromCamera(_paintNdc, camera);
+  const hits = _paintRay.intersectObjects(horseHairMeshes, true);
+  if (!hits.length || !hits[0].uv) return;
+  const uv = hits[0].uv;
+  const x = uv.x * 512, y = uv.y * 512;   // flipY=false → canvas y = uv.y
+  const ctx = _paintCtx, R = 34;
+  // source-atop: vivid colour only where the strands are (keeps their shape, not
+  // the grey). Soft edge via the gradient's fading alpha.
+  ctx.globalCompositeOperation = 'source-atop';
+  const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+  g.addColorStop(0, paintColor); g.addColorStop(0.7, paintColor); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  _paintTex.needsUpdate = true;
+}
+
 // The horse's whole appearance in one place. Mud rides on top of the makeover
 // (painted into the coat) and is removed only by washing (which also resets
 // groomLevel). Stages: 1 = glossy coat, 2 = bow on the mane, 3 = rainbow mane+tail.
@@ -2094,7 +2169,8 @@ function refreshHorseLook() {
     if ('metalness' in m) m.metalness = Math.min(isWhite ? 0.35 : 0.22, (isWhite ? 0.12 : 0.08) * glossLevel);
     m.needsUpdate = true;
   }
-  if (groomLevel >= 3) paintHairRainbow(); else restoreHair();
+  if (hairPainted && _paintTex) applyHairMap(_paintTex);   // custom paint wins
+  else if (groomLevel >= 3) paintHairRainbow(); else restoreHair();
   const acc = ensureGroomAccessories();
   if (acc) acc.bow.visible = groomLevel >= 2;
 }
@@ -6752,6 +6828,7 @@ function createHorse() {
   refreshHorseLook();
   loadCoatSkin(); // async: swaps in the purpose-made white skin if present
   loadGroomedSkin(); // async: the freshly-groomed skin, shown from groom stage 1
+  loadHairPaint();   // async: restore a saved mane/tail painting
   applySaddle(); // show the saddle if one was already bought (restored save)
 }
 
@@ -7186,6 +7263,16 @@ function initInput() {
   });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
+  // Mane/tail painting: brush where the pointer drags over the horse's hair.
+  const canvasEl = renderer && renderer.domElement;
+  if (canvasEl) {
+    canvasEl.addEventListener('pointerdown', (e) => { if (!paintMode) return; _isPainting = true; paintStrokeAt(e.clientX, e.clientY); });
+    window.addEventListener('pointermove', (e) => { if (paintMode && _isPainting) paintStrokeAt(e.clientX, e.clientY); });
+    window.addEventListener('pointerup', () => { _isPainting = false; });
+  }
+  // Dev: ?save_name slot + press P to open the paint mode quickly.
+  window.addEventListener('keydown', (e) => { if (e.code === 'KeyU' && SAVE_NAME) enterPaintMode(); });
+
   // Detect mobile
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if (isMobile) {
@@ -7362,6 +7449,8 @@ function computeMobileActions() {
     } else if (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
       contextual.push({ id: 'groom', emoji: '💈', glow: true, label: 'Upiększ', badge: groomPrice() + '🪙', action: attemptSalonAction });
     }
+    // Paint the mane/tail — always available (cosmetic), even when fully groomed.
+    contextual.push({ id: 'paint', emoji: '🎨', glow: true, label: 'Maluj grzywę', action: enterPaintMode });
   }
   // Stable — a coloured button per coat (mobile has no number keys). Distinct
   // dots so a non-reader never faces identical emoji.
@@ -7464,7 +7553,7 @@ function sfx(kind) {
 
 // ===== Desktop station click-panel: big mouse-friendly tiles =====
 // Reuses computeMobileActions() so shop / sell / stable / salon stay one mechanic.
-const STATION_ID_RE = /^(buy:|sell:|coat:|wash$|groom$|farmer:)/;
+const STATION_ID_RE = /^(buy:|sell:|coat:|wash$|groom$|paint$|farmer:)/;
 let stationPanelSig = '';
 let mouseTaught = false;
 try { mouseTaught = localStorage.getItem('konikMouseTaught') === '1'; } catch {}
@@ -7522,7 +7611,7 @@ function getInput() {
   let forward = 0, turn = 0, turnIntent = 0;
 
   // Freeze controls while eating or being groomed
-  if (isEatingCarrots || isGrooming) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
+  if (isEatingCarrots || isGrooming || paintMode) return { forward: 0, turn: 0, turnIntent: 0, moving: false };
 
   // Steering is arrow keys only (+ mobile joystick below). WASD is intentionally
   // NOT bound to movement: W/S/D are action keys (drink napój / buy siano / buy
@@ -8488,6 +8577,12 @@ function update() {
   Sfx.updatePositional(horsePos.x, horsePos.z, dt);
 
   Camera.follow(dt);
+  if (paintMode && horse) {
+    // Side profile so the mane and tail are both visible and clickable.
+    const rx = Math.cos(horseAngle), rz = -Math.sin(horseAngle); // horse's right
+    camera.position.set(horsePos.x + rx * 7.5, horsePos.y + 3.2, horsePos.z + rz * 7.5);
+    camera.lookAt(horsePos.x, horsePos.y + 1.7, horsePos.z);
+  }
 
   // Challenge management. Solo: spawn locally as before. Multiplayer: the host
   // owns the shared gate set (see mpWorldTick); clients never spawn — they only
