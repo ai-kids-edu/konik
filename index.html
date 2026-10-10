@@ -497,7 +497,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 79, label: 'Postacie patrzą we właściwą stronę' };
+const GAME_VERSION = { number: 80, label: 'Zwierzeta w tych samych miejscach (MP)' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -8931,7 +8931,9 @@ const MP = {
   status: 'off',        // off | connecting | connected
   room: null,
   sendState: null, sendEmote: null,
-  sendWorld: null, sendSolve: null, sendPick: null,
+  sendWorld: null, sendSolve: null, sendPick: null, sendNpc: null,
+  npcTargets: {},       // client: id -> {x,y,z,a} latest host position for ambient NPCs
+  _npcSend: 0,          // host: NPC broadcast throttle
   peers: {},            // peerId -> { group, mixer, acts, label, model, coat, tag, curAnim, target, cur, last }
   secret: '',
   tag: '🐴',
@@ -9062,13 +9064,16 @@ async function mpConnect(secret) {
     const [sendWorld, getWorld] = MP.room.makeAction('wd');   // host → all: shared-world snapshot
     const [sendSolve, getSolve] = MP.room.makeAction('sv');   // client → host: I answered a gate
     const [sendPick,  getPick]  = MP.room.makeAction('pk');   // client → host: I took a collectible
+    const [sendNpc,   getNpc]   = MP.room.makeAction('np');   // host → all: ambient NPC positions
     MP.sendState = sendState; MP.sendEmote = sendEmote;
     MP.sendWorld = sendWorld; MP.sendSolve = sendSolve; MP.sendPick = sendPick;
+    MP.sendNpc = sendNpc;
     getState((data, id) => mpOnState(id, data));
     getEmote((data, id) => mpOnEmote(id, data));
     getWorld((data, id) => mpOnWorld(id, data));
     getSolve((data, id) => mpOnSolve(id, data));
     getPick((data, id) => mpOnPick(id, data));
+    getNpc((data, id) => mpOnNpc(id, data));
     MP.room.onPeerJoin((id) => {
       mpFlash('Dołączył gracz!');
       mpSendStateNow();
@@ -9099,7 +9104,8 @@ async function mpConnect(secret) {
 function mpDisconnect() {
   try { if (MP.room) MP.room.leave(); } catch {}
   MP.room = null; MP.sendState = null; MP.sendEmote = null;
-  MP.sendWorld = null; MP.sendSolve = null; MP.sendPick = null;
+  MP.sendWorld = null; MP.sendSolve = null; MP.sendPick = null; MP.sendNpc = null;
+  MP.npcTargets = {};
   for (const id of Object.keys(MP.peers)) mpRemovePeer(id);
   MP.status = 'off'; MP.hostId = ''; MP.world = null;   // gates on screen stay as this player's own solo world
   challengeCooldown = 2;                                 // resume local spawning gently
@@ -9191,6 +9197,51 @@ function mpTick(dt) {
     em.sprite.position.y = em.baseY + em.t * 1.6;
     em.sprite.material.opacity = Math.max(0, 1 - em.t / 1.6);
     if (em.t >= 1.6) { if (em.group) em.group.remove(em.sprite); MP._emotes.splice(i, 1); }
+  }
+  // ambient NPC sync: host broadcasts their positions, clients snap theirs to it
+  // so the crab, cheetah, tiger and farm animals are in the same spot for everyone.
+  if (mpConnected()) {
+    if (mpIsHost()) { MP._npcSend += dt; if (MP._npcSend >= 0.15) { MP._npcSend = 0; mpBroadcastNpc(); } }
+    else mpApplyNpc(dt);
+  }
+}
+
+// The ambient wandering NPCs we keep in sync (only the ones that actually exist yet).
+function mpNpcList() {
+  const list = [];
+  if (typeof crabGroup !== 'undefined' && crabGroup) list.push({ id: 'crab', g: crabGroup });
+  if (typeof cheetahData !== 'undefined' && cheetahData && cheetahData.group) list.push({ id: 'chee', g: cheetahData.group });
+  if (typeof dalmatianData !== 'undefined' && dalmatianData && dalmatianData.group) list.push({ id: 'dalm', g: dalmatianData.group });
+  if (typeof tigerData !== 'undefined' && tigerData && tigerData.group) list.push({ id: 'tigr', g: tigerData.group });
+  for (let i = 0; i < farmAnimals.length; i++) { const a = farmAnimals[i]; if (a && a.group) list.push({ id: 'fa' + i, g: a.group }); }
+  return list;
+}
+
+function mpBroadcastNpc() {
+  if (!mpIsHost() || !MP.sendNpc) return;
+  const arr = mpNpcList().map(n => ({
+    i: n.id,
+    x: +n.g.position.x.toFixed(2), y: +n.g.position.y.toFixed(2), z: +n.g.position.z.toFixed(2),
+    a: +n.g.rotation.y.toFixed(2),
+  }));
+  if (arr.length) MP.sendNpc(arr);
+}
+
+function mpOnNpc(id, d) {
+  if (mpIsHost() || !Array.isArray(d)) return;   // only clients adopt the host's NPC layout
+  for (const n of d) MP.npcTargets[n.i] = { x: n.x, y: n.y, z: n.z, a: n.a };
+}
+
+// Client: pull each NPC toward the host's position (overrides its local wander).
+function mpApplyNpc(dt) {
+  const k = 1 - Math.pow(0.0001, dt);   // fast follow — effectively host-driven
+  for (const n of mpNpcList()) {
+    const t = MP.npcTargets[n.id]; if (!t) continue;
+    n.g.position.x += (t.x - n.g.position.x) * k;
+    n.g.position.y += (t.y - n.g.position.y) * k;
+    n.g.position.z += (t.z - n.g.position.z) * k;
+    let da = t.a - n.g.rotation.y; while (da > Math.PI) da -= Math.PI * 2; while (da < -Math.PI) da += Math.PI * 2;
+    n.g.rotation.y += da * k;
   }
 }
 
