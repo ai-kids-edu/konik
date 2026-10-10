@@ -406,6 +406,51 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 .emote-btn { font-size: 28px; background: rgba(255,255,255,0.12); border: none; border-radius: 50%; width: 50px; height: 50px; cursor: pointer; transition: transform 0.1s; }
 .emote-btn:hover { transform: scale(1.15); background: rgba(255,255,255,0.25); }
 .emote-btn:active { transform: scale(0.9); }
+/* ===== Desktop station click-panel (mouse teaching) ===== */
+#station-panel {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
+  z-index: 60; opacity: 0; pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+#station-panel.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+#station-tiles {
+  display: flex; gap: 16px; align-items: flex-end; justify-content: center;
+  background: rgba(20,14,8,0.55); backdrop-filter: blur(6px);
+  border: 4px solid rgba(255,220,120,0.9); border-radius: 26px; padding: 16px 20px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.station-tile {
+  position: relative; width: 122px; min-height: 128px; cursor: pointer;
+  background: rgba(0,0,0,0.3); border: 4px solid rgba(255,255,255,0.45);
+  border-radius: 20px; padding: 12px 10px 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px;
+  transition: transform .1s ease, background .1s ease, border-color .1s ease, box-shadow .1s ease;
+  user-select: none;
+}
+.station-tile .st-emoji { font-size: 58px; line-height: 1; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4)); }
+.station-tile .st-label { color: #fff; font-size: 20px; font-weight: 800; text-align: center;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.6); font-family: 'Segoe UI', Tahoma, sans-serif; line-height: 1.1; }
+.station-tile .st-badge { color: #ffe08a; font-size: 20px; font-weight: 900; text-shadow: 1px 1px 0 rgba(0,0,0,0.6); }
+.station-tile:hover { transform: translateY(-6px) scale(1.05);
+  background: rgba(40,28,14,0.55); border-color: #ffe08a; box-shadow: 0 10px 26px rgba(0,0,0,0.5); }
+.station-tile:active { transform: translateY(-2px) scale(0.96); }
+.station-tile.glow { border-color: rgba(255,220,120,0.95); animation: station-pulse 1s ease-in-out infinite; }
+@keyframes station-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,220,120,0.5); }
+  50% { box-shadow: 0 0 0 10px rgba(255,220,120,0); }
+}
+/* Onboarding hand: bounces on the first tile until the first click. */
+#station-hand {
+  position: absolute; font-size: 56px; pointer-events: none; z-index: 61;
+  transform: translate(-50%, 0); filter: drop-shadow(0 4px 6px rgba(0,0,0,0.4));
+  animation: hand-tap 1s ease-in-out infinite;
+}
+#station-hand .hand-caption {
+  position: absolute; top: 58px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  background: #ffcf5a; color: #3a1d08; font-weight: 900; font-size: 20px; padding: 4px 14px;
+  border-radius: 14px; box-shadow: 0 3px 0 #c99a2e; font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+@keyframes hand-tap { 0%,100% { translate: 0 0; } 50% { translate: 0 -14px; } }
 </style>
 </head>
 <body>
@@ -474,6 +519,10 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 
 <div id="mobile-actions"></div>
 
+<!-- Desktop click panel: big mouse-friendly tiles for the station the horse is
+     standing at (shop / sell / stable / salon). Teaches clicking. -->
+<div id="station-panel"><div id="station-tiles"></div></div>
+
 <!-- Steering feedback: marker sits centred + green when going straight, slides
      left/right and turns orange to show which way / how hard we're turning. -->
 <div id="steer-indicator">
@@ -497,7 +546,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 80, label: 'Zwierzeta w tych samych miejscach (MP)' };
+const GAME_VERSION = { number: 81, label: 'Klikanie myszką w sklepach' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7239,7 +7288,7 @@ function computeMobileActions() {
   let buyBtn = null;
   if (buyingItem && Economy.canBuy(z.itemKey)) {
     const it = SHOP_ITEMS[z.itemKey];
-    buyBtn = { id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true,
+    buyBtn = { id: 'buy:' + z.itemKey, emoji: it.emoji, glow: true, label: 'Kup ' + it.name,
       badge: it.price === 0 ? '🎁' : it.price + '🪙',
       action: () => attemptBuyItem(z.itemKey) };
   }
@@ -7258,9 +7307,9 @@ function computeMobileActions() {
   // Mount / dismount a farmer (Space on desktop). glow draws the kid's eye,
   // like the 3D beacon pulse used for the same "useful now" cue.
   if (ridingFarmer) {
-    contextual.push({ id: 'farmer:down', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+    contextual.push({ id: 'farmer:down', emoji: '🧑‍🌾', glow: true, label: 'Wysadź', action: handleSpaceAction });
   } else if (nearMountableFarmer()) {
-    contextual.push({ id: 'farmer:up', emoji: '🧑‍🌾', glow: true, action: handleSpaceAction });
+    contextual.push({ id: 'farmer:up', emoji: '🧑‍🌾', glow: true, label: 'Zabierz', action: handleSpaceAction });
   }
   // Sell buttons — keyed off sellZone.inZone directly (like attemptSellItem),
   // NOT the nearest zone. The sell and siano-buy counters overlap, so the
@@ -7268,16 +7317,16 @@ function computeMobileActions() {
   // mobile kid standing in the overlap unable to sell what a desktop kid can.
   if (sellZone && sellZone.inZone) {
     if (carrots > 0) contextual.push({ id: 'sell:carrot', emoji: '🥕', glow: true,
-      action: () => attemptSellItem('carrot') });
+      label: 'Sprzedaj', badge: CARROT_PRICE + '🪙', action: () => attemptSellItem('carrot') });
     if (applesCollected > 0) contextual.push({ id: 'sell:apple', emoji: '🍎', glow: true,
-      action: () => attemptSellItem('apple') });
+      label: 'Sprzedaj', badge: APPLE_PRICE + '🪙', action: () => attemptSellItem('apple') });
   }
   // Groom button — at the salon, when the kid can afford it.
   if (z && z.kind === 'groom') {
     if (isDirty) {
-      contextual.push({ id: 'wash', emoji: '🧼', glow: true, action: attemptSalonAction });
+      contextual.push({ id: 'wash', emoji: '🧼', glow: true, label: 'Umyj konika', action: attemptSalonAction });
     } else if (groomLevel < GROOM_MAX_LEVEL && money >= groomPrice()) {
-      contextual.push({ id: 'groom', emoji: '💈', glow: true, badge: groomPrice() + '🪙', action: attemptSalonAction });
+      contextual.push({ id: 'groom', emoji: '💈', glow: true, label: 'Upiększ', badge: groomPrice() + '🪙', action: attemptSalonAction });
     }
   }
   // Stable — a coloured button per coat (mobile has no number keys). Distinct
@@ -7285,7 +7334,7 @@ function computeMobileActions() {
   if (z && z.kind === 'stable') {
     const dot = { white: '⚪', gniady: '🟤', bulany: '🟡' };
     COAT_SKINS.forEach((c, i) => {
-      contextual.push({ id: 'coat:' + c.key, emoji: dot[c.key] || '🐴',
+      contextual.push({ id: 'coat:' + c.key, emoji: dot[c.key] || '🐴', label: c.name,
         glow: c.key !== coatSkin, action: () => attemptSelectHorse(i) });
     });
   }
@@ -7353,6 +7402,85 @@ function updateMobileButtons() {
     };
     btn.addEventListener('pointerdown', fire);
     container.appendChild(btn);
+  }
+}
+
+// ===== Simple WebAudio blips (no asset files) for the click panel =====
+let _audioCtx = null;
+function sfx(kind) {
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ac = _audioCtx; if (ac.state === 'suspended') ac.resume();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    const t = ac.currentTime;
+    if (kind === 'buy') {           // happy two-note "ching"
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(680, t); o.frequency.setValueAtTime(1020, t + 0.09);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26); o.start(t); o.stop(t + 0.27);
+    } else {                         // soft click pop
+      o.type = 'square';
+      o.frequency.setValueAtTime(540, t);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); o.start(t); o.stop(t + 0.13);
+    }
+  } catch {}
+}
+
+// ===== Desktop station click-panel: big mouse-friendly tiles =====
+// Reuses computeMobileActions() so shop / sell / stable / salon stay one mechanic.
+const STATION_ID_RE = /^(buy:|sell:|coat:|wash$|groom$|farmer:)/;
+let stationPanelSig = '';
+let mouseTaught = false;
+try { mouseTaught = localStorage.getItem('konikMouseTaught') === '1'; } catch {}
+function updateStationPanel() {
+  if (isMobile) return;                        // desktop only (mobile uses #mobile-actions)
+  const panel = document.getElementById('station-panel');
+  const wrap = document.getElementById('station-tiles');
+  if (!panel || !wrap) return;
+  const list = computeMobileActions().filter(b => STATION_ID_RE.test(b.id));
+  const sig = list.map(b => b.id + (b.glow ? '!' : '') + (b.badge || '') + (b.label || '')).join('|');
+  if (sig === stationPanelSig) return;
+  stationPanelSig = sig;
+
+  if (list.length === 0) {                     // left the station → hide + drop the tutor hand
+    panel.classList.remove('show');
+    const h = document.getElementById('station-hand'); if (h) h.remove();
+    return;
+  }
+  wrap.innerHTML = '';
+  for (const b of list) {
+    const tile = document.createElement('div');
+    tile.className = 'station-tile' + (b.glow ? ' glow' : '');
+    tile.innerHTML = `<div class="st-emoji">${b.emoji}</div>`
+      + (b.label ? `<div class="st-label">${b.label}</div>` : '')
+      + (b.badge ? `<div class="st-badge">${b.badge}</div>` : '');
+    let last = -1e9;
+    tile.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.timeStamp - last < 250) return; last = e.timeStamp;
+      sfx(/^(buy:|sell:)/.test(b.id) ? 'buy' : 'click');
+      if (!mouseTaught) { mouseTaught = true; try { localStorage.setItem('konikMouseTaught', '1'); } catch {}
+        const h = document.getElementById('station-hand'); if (h) h.remove(); }
+      b.action();
+    });
+    wrap.appendChild(tile);
+  }
+  panel.classList.add('show');
+
+  // First-ever station: a bouncing hand over the first tile + "Kliknij!".
+  if (!mouseTaught) {
+    let hand = document.getElementById('station-hand');
+    if (!hand) {
+      hand = document.createElement('div');
+      hand.id = 'station-hand';
+      hand.innerHTML = '👆<div class="hand-caption">Kliknij!</div>';
+      panel.appendChild(hand);
+    }
+    const first = wrap.firstChild;
+    if (first) { hand.style.left = (first.offsetLeft + first.offsetWidth / 2) + 'px';
+                 hand.style.bottom = '6px'; }
   }
 }
 
@@ -8412,6 +8540,7 @@ function update() {
   updateHippodrome(dt);
   updateCave(dt);
   updateMobileButtons();
+  updateStationPanel();
   updateLetterDelivery(dt);
   updateMud();
   updatePassengerQuests(dt);
