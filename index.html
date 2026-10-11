@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 91, label: "Malowanie: widok 3/4 + sync MP" };
+const GAME_VERSION = { number: 92, label: 'Wjedź do budynków' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3991,14 +3991,31 @@ function _placeBuilding(group, x, z, side, w, d) {
   // Rotation Y by +PI/2 maps local +Z to world +X.
   group.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
   scene.add(group);
-  // Collider in world space: after rotation Y by ±90°, X and Z swap.
-  // World half-extent along X = d/2 + porch (~1.6), along Z = w/2.
-  const halfWorldX = d / 2 + 0.4;
-  const halfWorldZ = w / 2 + 0.3;
-  barnColliders.push({
-    minX: x - halfWorldX, maxX: x + halfWorldX,
-    minZ: z - halfWorldZ, maxZ: z + halfWorldZ,
-  });
+  // Enterable: instead of one solid box, push four walls with a gap in the FRONT
+  // wall where the door is, so the horse can ride in through the doorway. Local
+  // space has the front at +Z (facade/door/porch); the ±90° placement rotation
+  // keeps every wall axis-aligned (it only swaps the X and Z axes), so each local
+  // wall rectangle maps to a world AABB.
+  const Hx = w / 2 + 0.3;   // local half-width (left-right)
+  const Hz = d / 2 + 0.4;   // local half-depth (front-back)
+  const t = 0.5;            // wall thickness
+  const g = 1.3;            // door half-gap in the front wall (opening ~2.6, horse fits)
+  const walls = [
+    [-Hx, Hx, -Hz, -Hz + t],   // back wall
+    [-Hx, -Hx + t, -Hz, Hz],   // left wall
+    [Hx - t, Hx, -Hz, Hz],     // right wall
+    [-Hx, -g, Hz - t, Hz],     // front wall, left of the door
+    [g, Hx, Hz - t, Hz],       // front wall, right of the door
+  ];
+  for (const [lx0, lx1, lz0, lz1] of walls) {
+    let wx0, wx1, wz0, wz1;
+    if (side === -1) { wx0 = lz0; wx1 = lz1; wz0 = -lx1; wz1 = -lx0; } // θ=+90°
+    else { wx0 = -lz1; wx1 = -lz0; wz0 = lx0; wz1 = lx1; }             // θ=−90°
+    barnColliders.push({
+      minX: x + Math.min(wx0, wx1), maxX: x + Math.max(wx0, wx1),
+      minZ: z + Math.min(wz0, wz1), maxZ: z + Math.max(wz0, wz1),
+    });
+  }
 }
 
 // Plank striped wall decoration (horizontal stripes) on front side (+Z local)
