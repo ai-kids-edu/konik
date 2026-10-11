@@ -413,6 +413,14 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
   transition: opacity .18s ease, transform .18s ease;
 }
 #station-panel.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+#station-caption {
+  max-width: 540px; margin: 0 auto 10px; text-align: center;
+  background: rgba(20,14,8,0.6); color: #ffe9b0; border: 3px solid rgba(255,220,120,0.6);
+  border-radius: 16px; padding: 8px 18px; font-size: 21px; font-weight: 800; line-height: 1.3;
+  font-family: "Segoe UI", Tahoma, sans-serif; text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
+  display: none;
+}
+#station-caption.show { display: block; }
 #station-tiles {
   display: flex; gap: 16px; align-items: flex-end; justify-content: center;
   background: rgba(20,14,8,0.55); backdrop-filter: blur(6px);
@@ -544,7 +552,7 @@ body.mobile #minimap { width: var(--mm-size); height: var(--mm-size); }
 
 <!-- Desktop click panel: big mouse-friendly tiles for the station the horse is
      standing at (shop / sell / stable / salon). Teaches clicking. -->
-<div id="station-panel"><div id="station-tiles"></div></div>
+<div id="station-panel"><div id="station-caption"></div><div id="station-tiles"></div></div>
 
 <!-- Mane/tail mini-paint: palette on the left, done button. Shown in paint mode. -->
 <div id="paint-ui">
@@ -576,7 +584,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 86, label: 'Spacja skok, E pasazer' };
+const GAME_VERSION = { number: 87, label: "Podpis questa na desktopie (list dla farmera)" };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -7557,21 +7565,47 @@ const STATION_ID_RE = /^(buy:|sell:|coat:|wash$|groom$|paint$|farmer:)/;
 let stationPanelSig = '';
 let mouseTaught = false;
 try { mouseTaught = localStorage.getItem('konikMouseTaught') === '1'; } catch {}
+// Desktop: a slim caption above the click panel for the guidance the big prompt
+// used to carry (the click tiles alone don't explain a quest like the letter).
+function stationCaptionText() {
+  const z = currentActiveZone;
+  if (!z) return '';
+  if (z.kind === 'buy' && z.itemKey === 'list') {
+    if ((inventory.list || 0) > 0 || z.justBought) return '💌 Masz list! Zawieź go farmerowi na farmę 🚜 — dostaniesz 🪙';
+    return '💌 List dla farmera — weź i zawieź na farmę 🚜, a dostaniesz 🪙';
+  }
+  if (z.kind === 'buy' && z.itemKey === 'siodlo') return '🐎 Siodło dla konika — raz kupione zostaje na zawsze';
+  if (z.kind === 'sell' && carrots === 0 && applesCollected === 0) return 'Nazbieraj 🥕 i 🍎 w świecie, potem wróć tu sprzedać!';
+  return '';
+}
+
 function updateStationPanel() {
   if (isMobile) return;                        // desktop only (mobile uses #mobile-actions)
   const panel = document.getElementById('station-panel');
   const wrap = document.getElementById('station-tiles');
   if (!panel || !wrap) return;
   const list = computeMobileActions().filter(b => STATION_ID_RE.test(b.id));
-  const sig = list.map(b => b.id + (b.glow ? '!' : '') + (b.badge || '') + (b.label || '')).join('|');
+  const caption = stationCaptionText();
+  const sig = caption + '§' + list.map(b => b.id + (b.glow ? '!' : '') + (b.badge || '') + (b.label || '')).join('|');
   if (sig === stationPanelSig) return;
   stationPanelSig = sig;
 
-  if (list.length === 0) {                     // left the station → hide + drop the tutor hand
-    panel.classList.remove('show');
+  const capEl = document.getElementById('station-caption');
+
+  if (list.length === 0) {                     // no tiles here
     const h = document.getElementById('station-hand'); if (h) h.remove();
+    if (caption) {                             // caption-only (e.g. "Masz list! zawieź na farmę")
+      if (capEl) { capEl.innerHTML = caption; capEl.classList.add('show'); }
+      wrap.innerHTML = ''; wrap.style.display = 'none';   // no empty tile box
+      panel.classList.add('show');
+    } else {                                   // truly left the station → hide
+      panel.classList.remove('show');
+      if (capEl) capEl.classList.remove('show');
+    }
     return;
   }
+  if (capEl) { capEl.innerHTML = caption; capEl.classList.toggle('show', !!caption); }
+  wrap.style.display = 'flex';
   wrap.innerHTML = '';
   for (const b of list) {
     const tile = document.createElement('div');
