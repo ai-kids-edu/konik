@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 92, label: 'Wjedź do budynków' };
+const GAME_VERSION = { number: 93, label: 'Malowanie: studio + spokojny kon' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -2215,6 +2215,7 @@ function updatePaintCursor() {
   _paintCursorEl.style.borderColor = paintTool === 'erase' ? '#fff' : paintColor;
   _paintCursorEl.querySelector('.pc-emoji').textContent = paintTool === 'glitter' ? '✨' : paintTool === 'erase' ? '🧽' : '🖌️';
 }
+let _paintHidden = [];   // scene objects hidden for the clean "studio" paint view
 function enterPaintMode() {
   if (!horse || !horseHairMeshes.length) return;
   ensurePaintCanvas(); initPaintUI();
@@ -2222,10 +2223,21 @@ function enterPaintMode() {
   paintMode = true; paintViewAngle = 0; paintViewHeight = 0;
   document.body.classList.add('painting');
   updatePaintCursor();
+  // "Studio" view: hide the world (buildings/trees/terrain/peers) so nothing —
+  // e.g. the salon roof — ever blocks the horse. Keep lights + the horse itself;
+  // the sky is scene.background (not a child) so it stays as a clean backdrop.
+  _paintHidden = [];
+  for (const o of scene.children) {
+    if (o === horseGroup || o.isLight || o === horseBlob) continue;
+    if (o.visible) { o.visible = false; _paintHidden.push(o); }
+  }
   const ui = document.getElementById('paint-ui'); if (ui) ui.classList.add('show');
 }
 function exitPaintMode() {
   paintMode = false; _isPainting = false;
+  for (const o of _paintHidden) o.visible = true;
+  _paintHidden = [];
+  if (horseMixer) horseMixer.timeScale = 1;
   document.body.classList.remove('painting');
   const ui = document.getElementById('paint-ui'); if (ui) ui.classList.remove('show');
   let data = null;
@@ -8168,6 +8180,7 @@ function animateHorse(dt, input) {
   if (!horseMixer) return;
   horseMixer.update(dt);
   if (isEatingCarrots || isJumping) return; // those animations own the horse
+  if (paintMode) { switchHorseAnim('idle'); horseMixer.timeScale = 0.15; return; } // stand calm while painting
 
   const speed = Math.abs(horseSpeed);
   const turn = input ? input.turn : 0;
