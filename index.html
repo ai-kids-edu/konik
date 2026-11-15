@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 93, label: 'Malowanie: studio + spokojny kon' };
+const GAME_VERSION = { number: 94, label: 'Nadmorska ścieżka + skarb' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -946,6 +946,7 @@ const CITY_SOUTH_EDGE = -390;
 const ROAD_HALF_WIDTH = 6;
 const CITY_CENTER_Z = -310;
 const SIDE_EDGE = 90; // |x| beyond this = side cliffs (kanion walls)
+const COAST_X = 150;  // how far along the shore you can walk before the end cliff
 
 // Beach has a natural curved shoreline instead of a straight line
 function beachStartZ(x) {
@@ -1236,6 +1237,7 @@ function initScene() {
 
   // Beach decorations (shells, rocks)
   createBeachDecorations();
+  buildCoastalCove();   // a walkable shore spur east along the cliffs → hidden treasure → end cliff
   createCrab();
   createDalmatian();
   createCheetah();
@@ -1527,6 +1529,54 @@ function animateWater(time) {
                       + Math.cos(time * 0.7 + x * 0.1 - z * 0.08) * waveAmp * 0.5;
   }
   waterMesh.geometry.attributes.position.needsUpdate = true;
+}
+
+// A walkable shore spur running east along the cliffs: decorated path, a hidden
+// treasure chest to discover, and a wall of big rocks (end cliff) you can't pass.
+let coastTreasure = null;
+function buildCoastalCove() {
+  // Palms + rocks lining the path from the meadow edge out to the end cliff.
+  for (let x = 96; x < 146; x += 6.5) {
+    const z = beachStartZ(x) + 2 + Math.random() * 3;
+    if (Math.random() < 0.6) {
+      const palm = cloneModel('palmtree', 2.1 + Math.random() * 0.9);
+      if (palm) { palm.position.set(x, getTerrainHeight(x, z - 3), z - 3); palm.rotation.y = Math.random() * 6; brightenModel(palm, 1.6); scene.add(palm); }
+    }
+    const rk = cloneModel(Math.random() < 0.5 ? 'rock_1' : 'rock_2', 1.0 + Math.random());
+    if (rk) { const rz = z + 4; rk.position.set(x + (Math.random() - 0.5) * 4, getTerrainHeight(x, rz), rz); brightenModel(rk, 1.5); scene.add(rk); }
+  }
+  // End cliff: a wall of big tall rocks just past COAST_X so you hit a dead end.
+  for (let i = 0; i < 8; i++) {
+    const cz = beachStartZ(COAST_X) - 14 + i * 8;
+    const rk = cloneModel(i % 2 ? 'rock_1' : 'rock_2', 4.5 + Math.random() * 2);
+    if (rk) { rk.position.set(COAST_X + 5 + Math.random() * 4, getTerrainHeight(COAST_X + 6, cz) - 1, cz); rk.scale.y *= 2.3; brightenModel(rk, 1.3); scene.add(rk); }
+  }
+  // Hidden treasure chest on the sand partway along.
+  const tx = 126, tz = beachStartZ(tx) + 6, ty = getTerrainHeight(tx, tz);
+  const g = new THREE.Group(); g.position.set(tx, ty, tz); g.rotation.y = -0.6;
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6a3d1c, roughness: 0.75 });
+  const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd24a, roughness: 0.3, metalness: 0.7, emissive: 0x6a4e00, emissiveIntensity: 0.4 });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.8), woodMat); box.position.y = 0.45; g.add(box);
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.35, 0.85), woodMat); lid.position.set(0, 0.9, -0.35); lid.rotation.x = -0.5; g.add(lid);
+  for (const by of [0.3, 0.6]) { const band = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.1, 0.82), goldMat); band.position.y = by; g.add(band); }
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.95, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.25, depthWrite: false }));
+  glow.position.y = 0.6; g.add(glow);
+  g.scale.setScalar(1.5); scene.add(g);
+  coastTreasure = { x: tx, z: tz, group: g, glow, lid, found: false };
+}
+function updateCoastTreasure() {
+  if (!coastTreasure || coastTreasure.found) return;
+  coastTreasure.glow.material.opacity = 0.18 + (Math.sin(clock.elapsedTime * 3) + 1) * 0.08;
+  const dx = horsePos.x - coastTreasure.x, dz = horsePos.z - coastTreasure.z;
+  if (dx * dx + dz * dz < 10) {
+    coastTreasure.found = true;
+    coastTreasure.glow.visible = false;
+    coastTreasure.lid.rotation.x = -1.6; // flip the lid open
+    money += 15; updateCarrotHUD();
+    spawnConfetti({ x: coastTreasure.x, y: coastTreasure.group.position.y + 2, z: coastTreasure.z });
+    spawnCoinBurst(coastTreasure.x, coastTreasure.z, 8);
+    showTransientPopup('reward', {}, 'Skarb na plaży! +15 <span style="font-size:64px">🪙</span>');
+  }
 }
 
 function createBeachDecorations() {
@@ -8379,7 +8429,12 @@ const HorseMotion = {
       horseSpeed = 0;
     }
 
-    horsePos.x = THREE.MathUtils.clamp(horsePos.x, -95, 95);
+    // Coastal walk: on the beach/shore band you can wander out past the meadow's
+    // side cliffs and follow the coastline to a hidden cove, ending at a cliff you
+    // can't pass (COAST_X). Inland (the meadow) stays walled at |x|=95.
+    const onCoast = horsePos.z > beachStartZ(horsePos.x) - 2;
+    const xLimit = onCoast ? COAST_X : 95;
+    horsePos.x = THREE.MathUtils.clamp(horsePos.x, -xLimit, xLimit);
     horsePos.z = THREE.MathUtils.clamp(horsePos.z, CITY_SOUTH_EDGE + 5, WATER_DEEP_Z - 1);
   },
 
@@ -8874,6 +8929,7 @@ function update() {
   updateStationPanel();
   updateLetterDelivery(dt);
   updateMud();
+  updateCoastTreasure();
   updatePassengerQuests(dt);
   updateStaminaBar();
   updateCrab(dt);
