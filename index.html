@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 99, label: 'Tor — cienkie collidery barierek (zakręty)' };
+const GAME_VERSION = { number: 100, label: 'Tor — barierki już nie „wachlarz" na zakrętach' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3668,7 +3668,7 @@ function buildHippodrome() {
     for (const ry of [0.55, 1.05]) {
       const rail = new THREE.Mesh(new THREE.BoxGeometry(len + 0.1, 0.09, 0.09), fenceMat);
       rail.position.set((x1 + x2) / 2, getTerrainHeight((x1 + x2) / 2, (z1 + z2) / 2) + ry, (z1 + z2) / 2);
-      rail.rotation.y = Math.atan2(z2 - z1, x2 - x1);
+      rail.rotation.y = Math.atan2(-(z2 - z1), x2 - x1);   // box length is along +X; align it with the segment
       group.add(rail);
     }
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 1.5, 8), postMat);
