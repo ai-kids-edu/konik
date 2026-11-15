@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 97, label: 'Wyścig — płotek startowy, wolniejsze 3·2·1, mniejszy stoper' };
+const GAME_VERSION = { number: 98, label: 'Wyścig — bez płotków do skakania' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3743,8 +3743,8 @@ function buildHippodrome() {
   group.add(barrier);
   H.startBarrier = barrier;
 
-  // ---- A few easy hurdles across the lane on the straights (jump each lap).
-  const hurdleUs = [0.18, 0.68];
+  // ---- Hurdles removed — the track is a clean run (no jumping).
+  const hurdleUs = [];
   const railMat = _mat(0xd94f6a, 0.75);
   const standMat = _mat(0xf3ede0, 0.85);
   for (const u of hurdleUs) {
