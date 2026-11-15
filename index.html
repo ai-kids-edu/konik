@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 98, label: 'Wyścig — bez płotków do skakania' };
+const GAME_VERSION = { number: 99, label: 'Tor — cienkie collidery barierek (zakręty)' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3674,11 +3674,14 @@ function buildHippodrome() {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 1.5, 8), postMat);
     post.position.set(x1, getTerrainHeight(x1, z1) + 0.75, z1);
     post.castShadow = true; group.add(post);
-    barnColliders.push({
-      minX: Math.min(x1, x2) - 0.35, maxX: Math.max(x1, x2) + 0.35,
-      minZ: Math.min(z1, z2) - 0.35, maxZ: Math.max(z1, z2) + 0.35,
-      jumpable: true,
-    });
+    // Collision: a single AABB over a DIAGONAL segment would be a fat square that
+    // eats into the lane on the turns. Instead lay a row of small boxes ALONG the
+    // rail, so the barrier stays thin on both the straights and the curves.
+    const steps = Math.max(1, Math.ceil(len / 0.8)), R = 0.32;
+    for (let i = 0; i <= steps; i++) {
+      const tx = x1 + (x2 - x1) * (i / steps), tz = z1 + (z2 - z1) * (i / steps);
+      barnColliders.push({ minX: tx - R, maxX: tx + R, minZ: tz - R, maxZ: tz + R, jumpable: true });
+    }
   };
   const FSEG = 48, off = H.lane / 2 + 0.7;
   const inner = [], outer = [];
