@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 96, label: 'Tor wyścigowy — równy owal + wyraźny wjazd' };
+const GAME_VERSION = { number: 97, label: 'Wyścig — płotek startowy, wolniejsze 3·2·1, mniejszy stoper' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3725,6 +3725,24 @@ function buildHippodrome() {
   group.add(gantry);
   H.startGantry = gantry;
 
+  // Starting gate: a red/white barrier across the lane just in front of the grid.
+  // Shown during the countdown, dropped (hidden) the instant the race starts.
+  const barrier = new THREE.Group();
+  const bz = H.lineZ + 10;                                   // just south of the front grid row
+  barrier.position.set(H.cx + H.ovRX, getTerrainHeight(H.cx + H.ovRX, bz), bz);
+  barrier.rotation.y = Math.atan2(across.x, across.z);
+  for (const sx of [-H.lane / 2, H.lane / 2]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.8, 8), _mat(0xffffff, 0.7));
+    post.position.set(sx, 0.9, 0); barrier.add(post);
+  }
+  for (let k = 0; k < 2; k++) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(H.lane, 0.22, 0.16), _mat(k ? 0xffffff : 0xd23b3b, 0.7));
+    rail.position.set(0, 0.55 + k * 0.5, 0); barrier.add(rail);
+  }
+  barrier.visible = false;
+  group.add(barrier);
+  H.startBarrier = barrier;
+
   // ---- A few easy hurdles across the lane on the straights (jump each lap).
   const hurdleUs = [0.18, 0.68];
   const railMat = _mat(0xd94f6a, 0.75);
@@ -3924,9 +3942,9 @@ function buildRaceUI() {
   btn.onclick = racePressStart;
   const cd = mk('race-countdown', base + 'left:50%;top:40%;transform:translate(-50%,-50%);'
     + 'color:#fff;font-size:150px;text-shadow:0 6px 24px rgba(0,0,0,0.6);display:none;pointer-events:none;');
-  const hud = mk('race-hud', base + 'left:50%;top:10%;transform:translateX(-50%);'
-    + 'background:rgba(20,40,20,0.82);color:#fff;padding:12px 26px;border-radius:20px;text-align:center;'
-    + 'border:4px solid rgba(180,255,150,0.9);box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none;pointer-events:none;');
+  const hud = mk('race-hud', base + 'left:50%;top:3%;transform:translateX(-50%);'
+    + 'background:rgba(20,40,20,0.6);color:#fff;padding:5px 14px;border-radius:14px;text-align:center;'
+    + 'box-shadow:0 3px 12px rgba(0,0,0,0.35);display:none;pointer-events:none;font-size:20px;');
   HIPPO.hud = hud;
   const res = mk('race-results', base + 'left:50%;top:22%;transform:translateX(-50%);'
     + 'background:rgba(25,25,40,0.92);color:#fff;padding:22px 34px;border-radius:24px;text-align:center;'
@@ -3978,7 +3996,7 @@ function raceApplyGrid(racers) {
   if (!me) { RACE.phase = 'idle'; return; }   // I wasn't in the arena — sit this one out
   raceTeleport(me.x, me.z, me.a);
   RACE.phase = 'countdown';
-  RACE.countdown = 3.2;
+  RACE.countdown = 7.0;   // 3·2·1 at ~2s each, then a big START for ~1s
   RACE.myFinished = false; RACE.myPlace = 0; RACE.myMs = 0;
   RACE.accum = 0; RACE.wentFar = false;
   RACE.prevTheta = Math.atan2(me.z - HIPPO.cz, me.x - HIPPO.cx);
@@ -4060,6 +4078,7 @@ function updateHippodrome(dt) {
   if (!hippoBuilt) return;
   if (H.beacon) H.beacon.material.emissiveIntensity = 0.5 + (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
   if (H.entranceArrow) H.entranceArrow.position.y = H.entranceY + Math.sin(clock.elapsedTime * 3) * 0.35;
+  if (H.startBarrier) H.startBarrier.visible = (RACE.phase === 'countdown');   // gate drops at GO
   const ui = RACE.ui;
   const inside = raceInArena(horsePos.x, horsePos.z);
   const onGround = !isJumping && (horsePos.y - getTerrainHeight(horsePos.x, horsePos.z) < 0.6);
@@ -4083,11 +4102,19 @@ function updateHippodrome(dt) {
 
   if (RACE.phase === 'countdown') {
     RACE.countdown -= dt;
+    if (H.startBarrier) H.startBarrier.visible = true;   // starting gate is down
     if (ui.cd) {
       ui.cd.style.display = 'block';
-      const n = Math.ceil(RACE.countdown - 0.2);
-      ui.cd.textContent = n >= 1 ? String(n) : 'START!';
-      ui.cd.style.color = n >= 1 ? '#fff' : '#8dff8d';
+      const n = Math.ceil((RACE.countdown - 1.0) / 2);   // 3,2,1 for ~2s each
+      if (n >= 1) {
+        ui.cd.textContent = String(n);
+        ui.cd.style.fontSize = '160px'; ui.cd.style.color = '#fff';
+        ui.cd.style.textShadow = '0 6px 24px rgba(0,0,0,0.6)';
+      } else {
+        ui.cd.textContent = 'START!';
+        ui.cd.style.fontSize = '120px'; ui.cd.style.color = '#8dff8d';
+        ui.cd.style.textShadow = '0 0 30px #3dff6a, 0 6px 24px rgba(0,0,0,0.7)';
+      }
     }
     if (ui.hud) ui.hud.style.display = 'none';
     if (RACE.countdown <= 0) { if (ui.cd) ui.cd.style.display = 'none'; raceGo(); }
@@ -4110,11 +4137,9 @@ function updateHippodrome(dt) {
     RACE.prevRel = rel;
     if (ui.hud) {
       ui.hud.style.display = 'block';
-      const place = RACE.myFinished && RACE.myPlace ? ` · ${RACE.myPlace}. miejsce` : '';
+      const place = RACE.myFinished && RACE.myPlace && RACE.count >= 2 ? ` · ${RACE.myPlace}.` : '';
       const done = RACE.myFinished ? ' ✓' : '';
-      ui.hud.innerHTML = `<div style="font-size:30px">⏱️ <b>${raceFmt(RACE.myMs)}</b>${done}</div>`
-        + (RACE.count >= 2 ? `<div style="font-size:18px;margin-top:4px;opacity:0.9">🏇 ${RACE.count} graczy${place}</div>` : '')
-        + (RACE.myFinished ? '' : `<div style="font-size:16px;margin-top:4px;opacity:0.8">Jedno okrążenie — wróć na metę 🏁</div>`);
+      ui.hud.innerHTML = `⏱️ <b>${raceFmt(RACE.myMs)}</b>${done}${place}`;   // compact stopwatch chip
     }
     if (mpIsHost() || !mpConnected()) {
       if (RACE.endTimer > 0) { RACE.endTimer -= dt; if (RACE.endTimer <= 0) { if (mpConnected() && MP.sendRace) MP.sendRace({ t: 'end' }); raceEnd(); } }
