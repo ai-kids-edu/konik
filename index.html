@@ -614,7 +614,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-const GAME_VERSION = { number: 95, label: 'Tor wyścigowy — prawdziwe wyścigi!' };
+const GAME_VERSION = { number: 96, label: 'Tor wyścigowy — równy owal + wyraźny wjazd' };
 
 // Dev/test switches via query string. `?save_name=foo` isolates progress in its
 // own slot (default = the shared 'horseGameState' the family plays, untouched).
@@ -3163,7 +3163,7 @@ const HIPPO = {
     if (s < arc) { const a = (s / arc) * Math.PI; return { x: cx + rx * Math.cos(a), z: (cz - hz) - rx * Math.sin(a) }; }
     s -= arc;
     if (s < straight) { const t = s / straight; return { x: cx - rx, z: (cz - hz) + t * straight }; }
-    s -= arc + straight;
+    s -= straight;
     { const a = (s / arc) * Math.PI; return { x: cx - rx * Math.cos(a), z: (cz + hz) + rx * Math.sin(a) }; }
   },
   // Unit tangent (direction of travel) at u, by finite difference.
@@ -3687,12 +3687,14 @@ function buildHippodrome() {
     inner.push({ x: p.x - n.x * off, z: p.z - n.z * off });
     outer.push({ x: p.x + n.x * off, z: p.z + n.z * off });
   }
-  const gapLo = 0.95, gapHi = 1.0;   // entrance gap in the OUTER fence near the grid
+  // Wide entrance gap in the OUTER (east) fence at the north end of the right
+  // straight, right by the grid — straddles the u=0 seam (north-turn end → top
+  // of the home straight), so it's a big, obvious opening you ride straight in.
+  const inGate = (u) => (u > 0.95 || u < 0.045);
   for (let s = 0; s < FSEG; s++) {
     const a = inner[s], b = inner[s + 1];
     fenceSeg(a.x, a.z, b.x, b.z);
-    const u = (s + 0.5) / FSEG;
-    if (u > gapLo && u < gapHi) continue;
+    if (inGate((s + 0.5) / FSEG)) continue;
     const oa = outer[s], ob = outer[s + 1];
     fenceSeg(oa.x, oa.z, ob.x, ob.z);
   }
@@ -3749,40 +3751,62 @@ function buildHippodrome() {
     H.hurdles.push({ cx: p.x, cz: p.z, group: hg });
   }
 
-  // ---- Entrance beacon + sign near the gap (north end of the right straight).
-  const entU = 0.975, ep = H.path(entU), en = H.normal(entU);
-  const ex = ep.x + en.x * (H.lane / 2 + 2.5), ez = ep.z + en.z * (H.lane / 2 + 2.5);
-  const entY = getTerrainHeight(ex, ez);
-  const signCanvas = document.createElement('canvas');
-  signCanvas.width = 256; signCanvas.height = 64;
-  const sc = signCanvas.getContext('2d');
-  sc.fillStyle = '#3a6b3a'; sc.fillRect(0, 0, 256, 64);
-  sc.fillStyle = '#fff'; sc.font = 'bold 28px Arial'; sc.textAlign = 'center'; sc.textBaseline = 'middle';
-  sc.fillText('TOR WYŚCIGOWY 🏁', 128, 34);
-  for (const sx of [-4.6, 4.6]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 6.4, 8), _mat(0x7a4a24, 0.85));
-    post.position.set(ex + sx, entY + 3.2, ez); post.castShadow = true; group.add(post);
+  // ---- Grand ENTRANCE gateway over the gap (north end of the east straight), so
+  // it's unmistakable where you ride in: a tall arch + banner + flags + a big
+  // green arrow pointing into the track + a pulsing beacon, all facing east
+  // toward an arriving rider.
+  const gateX = H.cx + H.ovRX + off;                         // east fence line
+  const gateZN = H.cz + H.ovHZ - 1, gateZS = H.cz + H.ovHZ - 13;   // post z's (span the gap)
+  const gateZC = (gateZN + gateZS) / 2, gateSpan = Math.abs(gateZN - gateZS);
+  const gY = getTerrainHeight(gateX, gateZC);
+  for (const pz of [gateZN, gateZS]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 8.0, 10), _mat(0x7a4a24, 0.85));
+    post.position.set(gateX + 0.4, getTerrainHeight(gateX, pz) + 4.0, pz);
+    post.castShadow = true; group.add(post);
   }
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(9.4, 2.3),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(signCanvas), side: THREE.DoubleSide }));
-  sign.position.set(ex, entY + 6.0, ez); group.add(sign);
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 12),
-    new THREE.MeshStandardMaterial({ color: 0x7dff7d, emissive: 0x4ddd4d, emissiveIntensity: 0.8, transparent: true, opacity: 0.85 }));
-  beacon.position.set(ex, entY + 7.4, ez); group.add(beacon);
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, gateSpan + 0.8), _mat(0x8a5a2a, 0.85));
+  beam.position.set(gateX + 0.4, gY + 7.6, gateZC); group.add(beam);
+  const bCanvas = document.createElement('canvas'); bCanvas.width = 512; bCanvas.height = 160;
+  const bg = bCanvas.getContext('2d');
+  bg.fillStyle = '#2b7a2b'; bg.fillRect(0, 0, 512, 160);
+  bg.fillStyle = '#ffffff'; bg.font = 'bold 56px Arial'; bg.textAlign = 'center'; bg.textBaseline = 'middle';
+  bg.fillText('🏁 WJAZD NA TOR', 256, 60);
+  bg.font = 'bold 44px Arial'; bg.fillText('⬅ tędy', 256, 120);
+  const banner = new THREE.Mesh(new THREE.PlaneGeometry(gateSpan, 2.8),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(bCanvas), side: THREE.DoubleSide, transparent: true }));
+  banner.position.set(gateX + 0.7, gY + 6.0, gateZC);
+  banner.rotation.y = Math.PI / 2;                           // face +X (east)
+  group.add(banner);
+  for (const pz of [gateZN + 1.4, gateZS - 1.4]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 5.5, 8), _mat(0xeeeeee, 0.6));
+    pole.position.set(gateX + 1.6, getTerrainHeight(gateX, pz) + 2.75, pz); group.add(pole);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.8),
+      new THREE.MeshStandardMaterial({ color: 0x4dc94d, emissive: 0x2a7a2a, emissiveIntensity: 0.4, side: THREE.DoubleSide }));
+    flag.position.set(gateX + 2.3, getTerrainHeight(gateX, pz) + 5.0, pz); group.add(flag);
+  }
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.9, 2.4, 5),
+    new THREE.MeshStandardMaterial({ color: 0x4dff6a, emissive: 0x25c045, emissiveIntensity: 0.9 }));
+  arrow.rotation.z = Math.PI / 2;                            // point -X (west, into the track)
+  arrow.position.set(gateX + 3.0, gY + 3.2, gateZC); group.add(arrow);
+  H.entranceArrow = arrow; H.entranceY = gY + 3.2;
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x7dff7d, emissive: 0x4ddd4d, emissiveIntensity: 0.8, transparent: true, opacity: 0.9 }));
+  beacon.position.set(gateX + 0.4, gY + 8.4, gateZC); group.add(beacon);
   H.beacon = beacon;
 
-  // ---- Simple grandstand (tiered benches) outside the east straight, for flavour.
-  const standX = H.cx + H.ovRX + H.lane / 2 + 6;
+  // ---- Grandstand (tiered benches) outside the SOUTH part of the east straight,
+  // clear of the entrance.
+  const standX = H.cx + H.ovRX + H.lane / 2 + 6, standZ = H.cz - 16;
   for (let tier = 0; tier < 4; tier++) {
     const bx = standX + tier * 1.1;
-    const bench = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 40), _mat(tier % 2 ? 0xc85a4a : 0xdd7a5a, 0.9));
-    bench.position.set(bx, getTerrainHeight(bx, H.cz) + 0.6 + tier * 0.6, H.cz);
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 30), _mat(tier % 2 ? 0xc85a4a : 0xdd7a5a, 0.9));
+    bench.position.set(bx, getTerrainHeight(bx, standZ) + 0.6 + tier * 0.6, standZ);
     bench.castShadow = true; group.add(bench);
   }
 
-  // Judge NPC + trophy shelf near the entrance.
-  createTownsperson(ex - 6, ez + 1, 0, 'sheriff');
-  buildTrophyShelf(ex + 7, ez + 1);
+  // Judge NPC + trophy shelf by the entrance.
+  createTownsperson(gateX + 4, gateZN + 3, 0, 'sheriff');
+  buildTrophyShelf(gateX + 5, gateZS - 3);
 
   // DOM race UI (start button, countdown, stopwatch, results) + load best time.
   buildRaceUI();
@@ -3790,7 +3814,7 @@ function buildHippodrome() {
 
   // Debug handle (only with ?debug) for scripted verification of the race logic.
   if (new URLSearchParams(location.search).has('debug')) {
-    window.__hippo = { HIPPO, RACE, press: racePressStart, barnColliders, tp: (x, z) => raceTeleport(x, z, Math.PI), pos: () => ({ x: horsePos.x, y: horsePos.y, z: horsePos.z }) };
+    window.__hippo = { HIPPO, RACE, press: racePressStart, barnColliders, tp: (x, z, a) => raceTeleport(x, z, a == null ? Math.PI : a), pos: () => ({ x: horsePos.x, y: horsePos.y, z: horsePos.z }) };
   }
 }
 
@@ -4035,6 +4059,7 @@ function updateHippodrome(dt) {
   const H = HIPPO;
   if (!hippoBuilt) return;
   if (H.beacon) H.beacon.material.emissiveIntensity = 0.5 + (Math.sin(clock.elapsedTime * 4) + 1) * 0.5;
+  if (H.entranceArrow) H.entranceArrow.position.y = H.entranceY + Math.sin(clock.elapsedTime * 3) * 0.35;
   const ui = RACE.ui;
   const inside = raceInArena(horsePos.x, horsePos.z);
   const onGround = !isJumping && (horsePos.y - getTerrainHeight(horsePos.x, horsePos.z) < 0.6);
